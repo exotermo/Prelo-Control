@@ -188,3 +188,7 @@ Cada tarefa gera `traceId`; cada run, chamada de modelo e ferramenta possui ID c
 ## 16. Riscos e decisões em aberto
 
 Não há base para decidir ainda a plataforma de UI, linguagem, biblioteca de persistência, provedor de LLM ou estratégia de identidade/sincronização. Essas escolhas devem ser fechadas em ADRs curtos antes do primeiro módulo executável. A proposta evita microserviços, filas distribuídas, múltiplos bancos e grafo dedicado na V1.
+
+## 17. Core Domain implementado
+
+O primeiro vertical slice implementa `Task → Context → Directive → GeneralAgent → HermesOrchestrator → LlmClient → Result`. As entidades em `domain` são Java puro; os casos de uso e portas estão em `application`; JPA/PostgreSQL e o adapter do contrato HTTP do Gateway estão em `infrastructure`. O Gateway permanece um serviço independente e não conhece Task, Agent ou orquestração do Hermes.

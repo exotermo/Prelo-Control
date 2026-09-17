@@ -7,6 +7,10 @@ Implementado nesta etapa:
 - PostgreSQL isolado, Flyway, logs correlacionados e auditoria sanitizada;
 - Docker Compose com redes `hermes_internal` (interna) e `hermes_egress` (somente Gateway), sem Docker socket, host networking, modo privilegiado ou porta de banco;
 - Hermes exposto somente em loopback para desenvolvimento.
+- Core Domain inicial: `Task`, `Context`, `Directive`, `Agent` (somente `GeneralAgent`) e `Execution`, com estados explícitos.
+- Fluxo de aplicação: criar task → orquestrar GeneralAgent → `LlmClient` → Gateway → resultado/execution; `GatewayLlmClient` é o único adapter novo que liga o core ao contrato público do Gateway.
+- API mínima: `POST /api/v1/tasks`, `POST /api/v1/tasks/{taskId}/execute` e `GET /api/v1/tasks/{taskId}`.
+- Persistência: migration V2 cria `tasks` e `task_executions` no schema `hermes_app`; nenhum schema ou tabela do Gateway foi alterado.
 
 ## Bootstrap de identidade
 

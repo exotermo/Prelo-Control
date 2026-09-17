@@ -1,0 +1,2 @@
+CREATE TABLE tasks (id UUID PRIMARY KEY, description VARCHAR(4000) NOT NULL, status VARCHAR(32) NOT NULL, created_at TIMESTAMPTZ NOT NULL);
+CREATE TABLE task_executions (id UUID PRIMARY KEY, task_id UUID NOT NULL REFERENCES tasks(id), agent_id VARCHAR(100) NOT NULL, status VARCHAR(32) NOT NULL, started_at TIMESTAMPTZ, completed_at TIMESTAMPTZ, error VARCHAR(1000));

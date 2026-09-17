@@ -1,0 +1,1 @@
+package br.com.exotermo.hermes.app.infrastructure.persistence; import java.util.*; import org.springframework.data.jpa.repository.JpaRepository; interface SpringTaskJpaRepository extends JpaRepository<TaskEntity,UUID>{}

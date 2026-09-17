@@ -5,9 +5,9 @@ Este plano começa somente após aprovação da arquitetura e das decisões aber
 | Etapa | Entregável pequeno | Critério de aceitação |
 |---|---|---|
 | 0 | Bootstrap escolhido, formatter, lint e teste de fumaça | build e teste vazios passam em ambiente limpo |
-| 1 | Tipos de domínio: IDs, Task, Directive, AgentDefinition, risco/permission | regras de transição e precedência cobertas por testes unitários |
+| 1 | Tipos de domínio: IDs, Task, Context, Directive, GeneralAgent e Execution | fluxo create → execute → resultado coberto por teste de aplicação |
 | 2 | Portas de repositório e implementação SQLite com migrações | criar/reabrir task e directive preserva dados e versões |
-| 3 | Casos de uso de conversa e task + eventos locais | intenção cria task e publica sequência verificável de eventos |
+| 3 | Casos de uso de task + orquestração linear | task persiste, executa via porta LLM e registra execution sem HTTP no domínio |
 | 4 | ContextResolver com fontes manuais e ContextSnapshot | somente itens selecionados entram no snapshot com proveniência |
 | 5 | LanguageModel port + um adaptador configurável/mock | resposta estruturada, timeout e erro tipado testados sem provider real |
 | 6 | GeneralAssistantAgent e TaskOrchestrator linear | task simples percorre READY → RUNNING → COMPLETED/FAILED e possui trace |
