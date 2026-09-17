@@ -1,0 +1,29 @@
+server:
+  port: 8081
+spring:
+  application:
+    name: llm-gateway
+  jpa:
+    hibernate:
+      ddl-auto: validate
+  flyway:
+    enabled: true
+    table: gateway_flyway_schema_history
+    schemas: gateway
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info
+  endpoint:
+    health:
+      probes:
+        enabled: true
+gateway:
+  jwt:
+    secret: ${GATEWAY_JWT_SECRET}
+    issuer: ${GATEWAY_JWT_ISSUER:hermes-dev}
+    audience: ${GATEWAY_JWT_AUDIENCE:llm-gateway}
+  provider:
+    mock:
+      enabled: ${GATEWAY_PROVIDER_MOCK_ENABLED:true}

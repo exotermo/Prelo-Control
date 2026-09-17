@@ -1,0 +1,30 @@
+# Secrets and local configuration
+.env
+.env.*
+!.env.example
+*.key
+*.pem
+*.p12
+secrets/
+credentials/
+
+# Java / Maven / Spring
+target/
+*.class
+*.jar
+*.war
+.mvn/wrapper/maven-wrapper.jar
+
+# Runtime data and logs
+logs/
+data/
+*.db
+*.sqlite
+*.sqlite3
+
+# IDE and OS
+.idea/
+*.iml
+.vscode/
+.DS_Store
+Thumbs.db

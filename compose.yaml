@@ -1,0 +1,78 @@
+services:
+  postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_DB: hermes
+      POSTGRES_USER: hermes
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    networks:
+      - hermes_internal
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U hermes -d hermes"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+
+  llm-gateway:
+    build:
+      context: ./llm-gateway
+    environment:
+      SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/hermes?currentSchema=gateway
+      SPRING_DATASOURCE_USERNAME: hermes
+      SPRING_DATASOURCE_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+      GATEWAY_JWT_SECRET: ${HERMES_GATEWAY_JWT_SECRET:?set HERMES_GATEWAY_JWT_SECRET in .env}
+      GATEWAY_JWT_ISSUER: ${HERMES_GATEWAY_ISSUER:-hermes-dev}
+      GATEWAY_JWT_AUDIENCE: ${HERMES_GATEWAY_AUDIENCE:-llm-gateway}
+      GATEWAY_PROVIDER_MOCK_ENABLED: "true"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - hermes_internal
+      - hermes_egress
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:8081/actuator/health | grep -q 'UP'"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 20s
+    restart: unless-stopped
+
+  hermes:
+    build:
+      context: ./hermes-app
+    environment:
+      SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/hermes?currentSchema=hermes_app
+      SPRING_DATASOURCE_USERNAME: hermes
+      SPRING_DATASOURCE_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+      HERMES_GATEWAY_BASE_URL: http://llm-gateway:8081
+      HERMES_GATEWAY_JWT_SECRET: ${HERMES_GATEWAY_JWT_SECRET:?set HERMES_GATEWAY_JWT_SECRET in .env}
+      HERMES_GATEWAY_ISSUER: ${HERMES_GATEWAY_ISSUER:-hermes-dev}
+      HERMES_GATEWAY_AUDIENCE: ${HERMES_GATEWAY_AUDIENCE:-llm-gateway}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      llm-gateway:
+        condition: service_healthy
+    ports:
+      - "127.0.0.1:8080:8080"
+    networks:
+      - hermes_internal
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:8080/actuator/health | grep -q 'UP'"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 20s
+    restart: unless-stopped
+
+networks:
+  hermes_internal:
+    internal: true
+  hermes_egress:
+
+volumes:
+  postgres_data:
