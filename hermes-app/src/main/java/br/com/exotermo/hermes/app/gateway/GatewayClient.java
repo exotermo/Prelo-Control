@@ -11,7 +11,9 @@ import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
+import java.net.http.HttpTimeoutException;
 import java.nio.charset.StandardCharsets;
+import java.time.Duration;
 import java.time.Instant;
 import java.util.Date;
 import java.util.List;
@@ -23,9 +25,11 @@ import org.springframework.stereotype.Component;
 @Component
 @EnableConfigurationProperties(GatewayProperties.class)
 public class GatewayClient implements LanguageModelGateway {
+    private static final Duration CONNECT_TIMEOUT = Duration.ofSeconds(5);
+    private static final Duration REQUEST_TIMEOUT = Duration.ofSeconds(10);
     private final GatewayProperties properties;
     private final ObjectMapper objectMapper;
-    private final HttpClient httpClient = HttpClient.newHttpClient();
+    private final HttpClient httpClient = HttpClient.newBuilder().connectTimeout(CONNECT_TIMEOUT).build();
     GatewayClient(GatewayProperties properties, ObjectMapper objectMapper) { this.properties = properties; this.objectMapper = objectMapper; }
 
     @Override public ChatResponse chat(ChatRequest request, String requestId) {
@@ -33,11 +37,12 @@ public class GatewayClient implements LanguageModelGateway {
             String body = objectMapper.writeValueAsString(request);
             HttpRequest httpRequest = HttpRequest.newBuilder(URI.create(properties.baseUrl() + "/api/v1/llm/chat"))
                 .header("Authorization", "Bearer " + serviceToken()).header("Content-Type", "application/json").header("X-Request-Id", requestId)
-                .POST(HttpRequest.BodyPublishers.ofString(body)).build();
+                .timeout(REQUEST_TIMEOUT).POST(HttpRequest.BodyPublishers.ofString(body)).build();
             HttpResponse<String> response = httpClient.send(httpRequest, HttpResponse.BodyHandlers.ofString());
             if (response.statusCode() != 200) throw new GatewayCallException(response.statusCode(), "Gateway rejected LLM request");
             return objectMapper.readValue(response.body(), ChatResponse.class);
         } catch (GatewayCallException exception) { throw exception; }
+        catch (HttpTimeoutException exception) { throw new GatewayCallException(504, "Gateway did not respond in time", exception); }
         catch (Exception exception) { throw new GatewayCallException(502, "Gateway communication failed", exception); }
     }
 

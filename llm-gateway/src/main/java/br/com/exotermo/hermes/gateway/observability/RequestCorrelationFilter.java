@@ -12,8 +12,8 @@ import org.springframework.web.filter.OncePerRequestFilter;
 @Component
 public class RequestCorrelationFilter extends OncePerRequestFilter {
     @Override protected void doFilterInternal(HttpServletRequest request, HttpServletResponse response, FilterChain chain) throws ServletException, IOException {
-        String requestId = request.getHeader("X-Request-Id");
-        if (requestId == null || requestId.isBlank()) requestId = UUID.randomUUID().toString();
+        String suppliedRequestId = request.getHeader("X-Request-Id");
+        String requestId = suppliedRequestId == null || suppliedRequestId.isBlank() ? UUID.randomUUID().toString() : suppliedRequestId;
         try { MDC.put("requestId", requestId); response.setHeader("X-Request-Id", requestId); chain.doFilter(request, response); }
         finally { MDC.remove("requestId"); }
     }
