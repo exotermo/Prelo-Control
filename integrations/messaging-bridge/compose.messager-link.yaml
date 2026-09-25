@@ -1,0 +1,23 @@
+# Attaches the standalone messager stack (messaging-core) to the Docker network shared with the
+# Hermes side, so messaging-core can deliver signed callbacks to this bridge by container name
+# and the bridge can reach messaging-core as http://messaging-core:8090.
+#
+# messager itself declares no network specific to Hermes; this file lives with the consumer.
+# Use it as a second -f file when starting messager (the project name is pinned to
+# "messager-interface" in its docker-compose.yml, so volumes are unaffected):
+#
+#   docker network create hermes-shared        # once
+#   docker compose \
+#     -f <path-to-messager>/docker-compose.yml \
+#     -f <path-to-hermes>/integrations/messaging-bridge/compose.messager-link.yaml \
+#     up -d
+services:
+  messaging-core:
+    networks:
+      hermes-shared:
+        aliases:
+          - messaging-core
+
+networks:
+  hermes-shared:
+    external: true
