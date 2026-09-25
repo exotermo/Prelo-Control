@@ -1,3 +1,6 @@
+# Pinned so renaming/moving this directory never changes the volume/network names.
+name: hermeserenato
+
 services:
   postgres:
     image: postgres:17-alpine
@@ -27,6 +30,10 @@ services:
       GATEWAY_JWT_ISSUER: ${HERMES_GATEWAY_ISSUER:-hermes-dev}
       GATEWAY_JWT_AUDIENCE: ${HERMES_GATEWAY_AUDIENCE:-llm-gateway}
       GATEWAY_PROVIDER_MOCK_ENABLED: "true"
+      GATEWAY_PROVIDER_ANTHROPIC_ENABLED: ${GATEWAY_PROVIDER_ANTHROPIC_ENABLED:-false}
+      GATEWAY_PROVIDER_ANTHROPIC_API_KEY_FILE: /run/secrets/anthropic_api_key
+    secrets:
+      - anthropic_api_key
     depends_on:
       postgres:
         condition: service_healthy
@@ -41,7 +48,13 @@ services:
       start_period: 20s
     restart: unless-stopped
 
+  # PARKED (2026-09-23): hermes-go is now the production service (ADR-012/ADR-013 cutover,
+  # authorized by the project owner). hermes-app (Java) is kept as source-only reference — code
+  # untouched, never deleted — but excluded from the default `docker compose up`. Start it
+  # explicitly with `docker compose --profile legacy-java up hermes` if you need to compare
+  # behavior against it again.
   hermes:
+    profiles: ["legacy-java"]
     build:
       context: ./hermes-app
     environment:
@@ -61,6 +74,7 @@ services:
       - "127.0.0.1:8080:8080"
     networks:
       - hermes_internal
+      - hermes_publish
     healthcheck:
       test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:8080/actuator/health | grep -q 'UP'"]
       interval: 10s
@@ -69,10 +83,91 @@ services:
       start_period: 20s
     restart: unless-stopped
 
+  redis:
+    image: redis:7-alpine
+    networks:
+      - hermes_internal
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+
+  hermes-go:
+    build:
+      context: ./hermes-app-go
+      # LOCAL-DEV WORKAROUND — a problem of the developer's own machine, NOT of this project and
+      # NOT to be carried to the server that runs Hermes. On that workstation the BuildKit
+      # sandbox's DNS (1.0.0.1) times out resolving proxy.golang.org, so `go mod download`
+      # (hermes-app-go/Dockerfile; vendor/ is intentionally not versioned) fails on the default
+      # build network. Host networking uses the host's working resolver instead.
+      # On any host whose Docker builds can reach proxy.golang.org, DELETE this line (or fix the
+      # daemon DNS via "dns" in /etc/docker/daemon.json) — see docs/DEV_HOST_NOTES.md.
+      network: host
+    environment:
+      HERMES_GO_PORT: "8080"
+      HERMES_GO_DB_HOST: postgres
+      HERMES_GO_DB_PORT: "5432"
+      HERMES_GO_DB_NAME: hermes
+      HERMES_GO_DB_SCHEMA: hermes_app
+      HERMES_GO_DB_USER: hermes
+      HERMES_GO_DB_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+      HERMES_GO_REDIS_ADDR: redis:6379
+      HERMES_GATEWAY_BASE_URL: http://llm-gateway:8081
+      HERMES_GATEWAY_JWT_SECRET: ${HERMES_GATEWAY_JWT_SECRET:?set HERMES_GATEWAY_JWT_SECRET in .env}
+      HERMES_GATEWAY_ISSUER: ${HERMES_GATEWAY_ISSUER:-hermes-dev}
+      HERMES_GATEWAY_AUDIENCE: ${HERMES_GATEWAY_AUDIENCE:-llm-gateway}
+      # Inbound API authentication is independent from the LLM gateway credential. The value
+      # must be the same signing secret used by messaging-core integration access tokens.
+      HERMES_GO_API_JWT_SECRET: ${HERMES_GO_API_JWT_SECRET:?set HERMES_GO_API_JWT_SECRET in .env}
+      HERMES_GO_API_JWT_ISSUER: ${HERMES_GO_API_JWT_ISSUER:-messaging-core}
+      HERMES_GO_API_JWT_AUDIENCE: ${HERMES_GO_API_JWT_AUDIENCE:-messaging-core}
+      HERMES_GO_API_AUTH_ENABLED: "true"
+      HERMES_GO_TOOL_TIMEOUT_SECONDS: ${HERMES_GO_TOOL_TIMEOUT_SECONDS:-30}
+      HERMES_GO_TOOL_MAX_ARGS_BYTES: ${HERMES_GO_TOOL_MAX_ARGS_BYTES:-65536}
+      HERMES_GO_TOOL_MAX_RESULT_BYTES: ${HERMES_GO_TOOL_MAX_RESULT_BYTES:-65536}
+      HERMES_GO_TOOL_MAX_CONCURRENT: ${HERMES_GO_TOOL_MAX_CONCURRENT:-16}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      llm-gateway:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    ports:
+      - "127.0.0.1:8082:8080"
+    networks:
+      hermes_internal:
+      hermes_publish:
+      hermes-shared:
+        aliases:
+          - hermes-go
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:8080/actuator/health | grep -q 'UP'"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 10s
+    restart: unless-stopped
+
 networks:
   hermes_internal:
     internal: true
   hermes_egress:
+  hermes_publish:
+  # Rede compartilhada com ~/projects/hermes-messaging-bridge (criada fora do compose com
+  # `docker network create hermes-shared`) — só hermes-go entra aqui, pra o bridge conseguir
+  # chamar a API de tasks por nome de container, sem publicar porta nenhuma pra fora.
+  hermes-shared:
+    external: true
 
 volumes:
   postgres_data:
+
+# Sourced from an env var (ANTHROPIC_API_KEY, via .env), not a committed file — still reaches the
+# container exclusively as a mounted file at /run/secrets/anthropic_api_key, never as an env var
+# inside the container itself. Mounted only in llm-gateway; hermes never sees this secret.
+secrets:
+  anthropic_api_key:
+    environment: ANTHROPIC_API_KEY
