@@ -1,10 +1,16 @@
 package br.com.exotermo.hermes.app.application;
 import br.com.exotermo.hermes.app.domain.*;
+import java.util.Comparator;
+import java.util.List;
+import java.util.stream.Collectors;
 public class AgentExecutor {
  private final LlmClient client;
  public AgentExecutor(LlmClient client) { this.client = client; }
- public String execute(Task task, Agent agent, Context context, Directive directive) {
-  String contextText = context.items().stream().map(item -> item.name() + ": " + item.content()).reduce("", (a,b) -> a + "\n" + b);
-  return client.chat("mock-echo", java.util.List.of(new LlmClient.Message("system", directive.instruction()), new LlmClient.Message("user", task.description() + contextText)), task.id().value().toString(), agent.id().value());
+ public LlmClient.ChatResult execute(Task task, AgentDefinition agent, ContextSnapshot snapshot, String requestId) {
+  String contextText = snapshot.items().stream()
+      .sorted(Comparator.comparingInt(ContextSnapshotItem::order))
+      .map(item -> item.name() + ": " + item.content())
+      .collect(Collectors.joining("\n"));
+  return client.chat(agent.modelProfile(), List.of(new LlmClient.Message("system", agent.directive()), new LlmClient.Message("user", contextText)), requestId, task.id().value().toString(), agent.agentId().value());
  }
 }

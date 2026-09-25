@@ -5,9 +5,11 @@ import java.util.Map;
 
 public final class GatewayContracts {
     private GatewayContracts() { }
-    public record ChatRequest(String model, List<Message> messages, Parameters parameters, Map<String, String> metadata) { }
+    // modelProfile is a curated profile name (e.g. "general-chat"), resolved by the Gateway into
+    // an ordered, administered candidate list — never a raw provider model, never a fallback list.
+    public record ChatRequest(String modelProfile, List<Message> messages, Parameters parameters, Map<String, String> metadata) { }
     public record Message(String role, String content) { }
     public record Parameters(Double temperature, Integer maxTokens) { }
-    public record ChatResponse(String id, String provider, String model, String content, Usage usage, long durationMs) { }
+    public record ChatResponse(String id, String provider, String model, String content, Usage usage, long durationMs, String requestId) { }
     public record Usage(int inputTokens, int outputTokens, int totalTokens) { }
 }

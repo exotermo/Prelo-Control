@@ -1,1 +1,1 @@
-package br.com.exotermo.hermes.app.infrastructure.persistence; import java.util.*; import org.springframework.data.jpa.repository.JpaRepository; interface SpringExecutionJpaRepository extends JpaRepository<ExecutionEntity,UUID>{}
+package br.com.exotermo.hermes.app.infrastructure.persistence; import java.util.*; import org.springframework.data.jpa.repository.JpaRepository; interface SpringExecutionJpaRepository extends JpaRepository<ExecutionEntity,UUID>{ List<ExecutionEntity> findByTaskId(UUID taskId); }
