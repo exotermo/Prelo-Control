@@ -1,0 +1,2 @@
+# Dependencies are downloaded at build time (see Dockerfile: go mod download).
+vendor/
