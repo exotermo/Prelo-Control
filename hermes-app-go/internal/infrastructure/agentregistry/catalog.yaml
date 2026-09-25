@@ -1,0 +1,36 @@
+# Curated agent catalog — mirrors hermes.agents.catalog in the Java service's
+# application.yml. model-profile names a profile resolved server-side by the Gateway's
+# routing config into an ordered, administered candidate list; Hermes never sends a raw
+# model or a fallback list. Both demo agents share "general-chat" on purpose.
+general:
+  agent-type: GENERAL
+  version: "1"
+  directive: "You are Hermes GeneralAgent. Respond concisely and helpfully."
+  model-profile: general-chat
+  # etapa 7/8: capability names must match a registered ToolExecutor's Definition().Name
+  # exactly (internal/infrastructure/toolregistry) — holding the capability is necessary but
+  # not sufficient, PermissionPolicy still decides ALLOW/DENY/REQUIRE_APPROVAL per call.
+  # delegate_to_agent (Fase C) lets General delegate to any curated agent, itself included —
+  # domain.MaxDelegationDepth is what actually bounds a runaway chain, not this list.
+  capabilities: ["current_time", "echo", "delegate_to_agent"]
+  name: General
+  description: "Default assistant for open-ended tasks."
+concise:
+  agent-type: GENERAL
+  version: "1.1"
+  directive: "You are Hermes ConciseAgent. Respond in at most two short sentences, no preamble."
+  model-profile: general-chat
+  name: Concise
+  description: "Same capability as General, tuned for terse answers."
+# Fase F point 4: routed to by hermes-messaging-bridge for any WhatsApp sender that is not a
+# known owner number (see BridgeProperties.ownerContacts). Deliberately no capabilities — a
+# customer-facing contact must never reach delegate_to_agent or any other tool just by being on
+# the messaging allowlist; empty capabilities is already a supported case (same as "concise").
+customer:
+  agent-type: GENERAL
+  version: "1"
+  directive: "You are Hermes, a helpful customer-facing assistant. Answer only what you can from the conversation itself."
+  model-profile: general-chat
+  capabilities: []
+  name: Customer
+  description: "Customer-facing assistant with no tool capabilities."
