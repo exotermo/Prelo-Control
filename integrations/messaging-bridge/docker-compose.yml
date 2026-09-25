@@ -1,0 +1,51 @@
+name: hermes-messaging-bridge
+
+services:
+  postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_DB: bridge
+      POSTGRES_USER: bridge
+      POSTGRES_PASSWORD: ${BRIDGE_DB_PASSWORD:?set BRIDGE_DB_PASSWORD in .env}
+    volumes:
+      - bridge_postgres_data:/var/lib/postgresql/data
+    networks:
+      - default
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U bridge -d bridge"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+
+  hermes-messaging-bridge:
+    build: .
+    depends_on:
+      postgres:
+        condition: service_healthy
+    ports:
+      - "127.0.0.1:8095:8095"
+    environment:
+      MESSAGING_CORE_URL: ${MESSAGING_CORE_URL}
+      MESSAGING_CORE_CLIENT_ID: ${MESSAGING_CORE_CLIENT_ID}
+      MESSAGING_CORE_CLIENT_SECRET: ${MESSAGING_CORE_CLIENT_SECRET}
+      CALLBACK_SIGNING_SECRET: ${CALLBACK_SIGNING_SECRET}
+      HERMES_APP_URL: ${HERMES_APP_URL}
+      BRIDGE_AUTO_REPLY_ENABLED: ${BRIDGE_AUTO_REPLY_ENABLED:-false}
+      BRIDGE_ADMIN_TOKEN: ${BRIDGE_ADMIN_TOKEN:?set BRIDGE_ADMIN_TOKEN in .env}
+      BRIDGE_OWNER_CONTACTS: ${BRIDGE_OWNER_CONTACTS:-}
+      BRIDGE_CALLBACK_REPLAY_TOLERANCE_SECONDS: ${BRIDGE_CALLBACK_REPLAY_TOLERANCE_SECONDS:-300}
+      BRIDGE_ALLOW_LEGACY_CALLBACK_SIGNATURES: ${BRIDGE_ALLOW_LEGACY_CALLBACK_SIGNATURES:-false}
+      BRIDGE_DB_URL: jdbc:postgresql://postgres:5432/bridge
+      BRIDGE_DB_USER: bridge
+      BRIDGE_DB_PASSWORD: ${BRIDGE_DB_PASSWORD:?set BRIDGE_DB_PASSWORD in .env}
+    networks:
+      - default
+      - hermes-shared
+
+networks:
+  hermes-shared:
+    external: true
+
+volumes:
+  bridge_postgres_data:
