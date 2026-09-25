@@ -1,0 +1,251 @@
+import { useEffect, useState } from "react";
+import {
+  ApiError,
+  createTask,
+  executeTask,
+  getLatestExecution,
+  getTask,
+  getTaskTree,
+  getTurns,
+  listTasks,
+  type Execution,
+  type Task,
+  type TaskTreeNode,
+  type Turn,
+} from "../api/client";
+
+function statusBadge(status: string) {
+  return <span className={`badge badge-${status.toLowerCase()}`}>{status}</span>;
+}
+
+export function TasksPage() {
+  const [tasks, setTasks] = useState<Task[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+
+  const [description, setDescription] = useState("");
+  const [agentId, setAgentId] = useState("");
+  const [creating, setCreating] = useState(false);
+
+  async function refresh() {
+    setLoading(true);
+    setError(null);
+    try {
+      setTasks(await listTasks());
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "Falha ao carregar tasks.");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  useEffect(() => {
+    void refresh();
+  }, []);
+
+  async function handleCreate(event: React.FormEvent) {
+    event.preventDefault();
+    if (!description.trim()) return;
+    setCreating(true);
+    setError(null);
+    try {
+      const task = await createTask(description.trim(), agentId.trim() || undefined);
+      setDescription("");
+      setAgentId("");
+      await refresh();
+      setSelectedId(task.id);
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "Falha ao criar task.");
+    } finally {
+      setCreating(false);
+    }
+  }
+
+  return (
+    <div className="task-layout">
+      <div>
+        <div className="page-header">
+          <h2>Tasks</h2>
+          <button onClick={() => void refresh()} disabled={loading}>
+            {loading ? "Atualizando…" : "Atualizar"}
+          </button>
+        </div>
+
+        <form className="card" style={{ marginBottom: 20 }} onSubmit={handleCreate}>
+          <h3>Nova task</h3>
+          <label>
+            Descrição
+            <textarea
+              value={description}
+              onChange={(event) => setDescription(event.target.value)}
+              placeholder="O que o agente deve fazer?"
+              required
+            />
+          </label>
+          <label>
+            Agent id (opcional — default &quot;general&quot;)
+            <input value={agentId} onChange={(event) => setAgentId(event.target.value)} placeholder="general" />
+          </label>
+          <button type="submit" className="primary" disabled={creating}>
+            {creating ? "Criando…" : "Criar task"}
+          </button>
+        </form>
+
+        {error && <p className="error">{error}</p>}
+
+        {!loading && tasks.length === 0 ? (
+          <div className="empty-state">Nenhuma task ainda. Crie uma acima.</div>
+        ) : (
+          <table>
+            <thead>
+              <tr>
+                <th>Descrição</th>
+                <th>Agente</th>
+                <th>Status</th>
+                <th>Criada em</th>
+              </tr>
+            </thead>
+            <tbody>
+              {tasks.map((task) => (
+                <tr key={task.id} className="clickable" onClick={() => setSelectedId(task.id)}>
+                  <td>{task.description}</td>
+                  <td className="mono">{task.agentId}</td>
+                  <td>{statusBadge(task.status)}</td>
+                  <td className="muted">{new Date(task.createdAt).toLocaleString()}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+      </div>
+
+      {selectedId && <TaskDetail taskId={selectedId} onTaskChanged={refresh} />}
+    </div>
+  );
+}
+
+function TaskDetail({ taskId, onTaskChanged }: { taskId: string; onTaskChanged: () => void }) {
+  const [task, setTask] = useState<Task | null>(null);
+  const [execution, setExecution] = useState<Execution | null>(null);
+  const [turns, setTurns] = useState<Turn[]>([]);
+  const [tree, setTree] = useState<TaskTreeNode | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [executing, setExecuting] = useState(false);
+
+  async function load() {
+    setError(null);
+    try {
+      const [taskData, treeData] = await Promise.all([getTask(taskId), getTaskTree(taskId)]);
+      setTask(taskData);
+      setTree(treeData);
+      try {
+        const exec = await getLatestExecution(taskId);
+        setExecution(exec);
+        setTurns(await getTurns(taskId, exec.executionId));
+      } catch (err) {
+        // No execution yet is expected right after creating a task — not an error to surface.
+        if (!(err instanceof ApiError && err.status === 404)) throw err;
+        setExecution(null);
+        setTurns([]);
+      }
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "Falha ao carregar detalhe da task.");
+    }
+  }
+
+  useEffect(() => {
+    void load();
+    const interval = setInterval(() => void load(), 2500);
+    return () => clearInterval(interval);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [taskId]);
+
+  async function handleExecute() {
+    setExecuting(true);
+    setError(null);
+    try {
+      await executeTask(taskId);
+      onTaskChanged();
+      await load();
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "Falha ao executar task.");
+    } finally {
+      setExecuting(false);
+    }
+  }
+
+  if (!task) return null;
+
+  const canExecute = task.status === "CREATED";
+
+  return (
+    <div className="task-detail">
+      <h3>
+        Detalhe {statusBadge(task.status)}
+      </h3>
+      <p className="mono muted">{task.id}</p>
+      <p>{task.description}</p>
+      <button className="primary" onClick={() => void handleExecute()} disabled={!canExecute || executing}>
+        {executing ? "Executando…" : canExecute ? "Executar" : "Já executada"}
+      </button>
+      {error && <p className="error">{error}</p>}
+
+      {execution && (
+        <>
+          <h3 style={{ marginTop: 24 }}>Execução {statusBadge(execution.status)}</h3>
+          {execution.result && <pre className="mono">{execution.result}</pre>}
+          {execution.error && <p className="error">{execution.error}</p>}
+        </>
+      )}
+
+      {turns.length > 0 && (
+        <>
+          <h3 style={{ marginTop: 24 }}>Trace turno a turno</h3>
+          <div className="turn-list">
+            {turns.map((turn) => (
+              <div className="turn-row" key={turn.turnNumber}>
+                <div className="turn-row-header">
+                  <strong>
+                    #{turn.turnNumber} · {turn.kind}
+                  </strong>
+                  <span className="muted">{turn.completedAt ? "concluído" : "em aberto"}</span>
+                </div>
+                {turn.output && <pre>{turn.output}</pre>}
+                {turn.error && <pre className="error">{turn.error}</pre>}
+              </div>
+            ))}
+          </div>
+        </>
+      )}
+
+      {tree && (tree.children.length > 0 || tree.depth > 0) && (
+        <>
+          <h3 style={{ marginTop: 24 }}>Delegação</h3>
+          <TreeNode node={tree} />
+        </>
+      )}
+    </div>
+  );
+}
+
+function TreeNode({ node }: { node: TaskTreeNode }) {
+  return (
+    <ul className="tree">
+      <li>
+        <div className="tree-node">
+          <span className="mono">{node.description}</span>
+          {statusBadge(node.status)}
+          {node.executionStatus && statusBadge(node.executionStatus)}
+        </div>
+        {node.children.length > 0 && (
+          <ul>
+            {node.children.map((child) => (
+              <TreeNode node={child} key={child.taskId} />
+            ))}
+          </ul>
+        )}
+      </li>
+    </ul>
+  );
+}
