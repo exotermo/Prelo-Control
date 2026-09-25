@@ -25,3 +25,23 @@ hermes:
     jwt-secret: ${HERMES_GATEWAY_JWT_SECRET}
     issuer: ${HERMES_GATEWAY_ISSUER:hermes-dev}
     audience: ${HERMES_GATEWAY_AUDIENCE:llm-gateway}
+  agents:
+    # model-profile names a profile resolved server-side by the Gateway's
+    # gateway.routing.profiles (fase 3) into an ordered, administered candidate list — Hermes
+    # never sends a raw model or a fallback list. Both demo agents share "general-chat" on
+    # purpose (same underlying capability, different directive/style).
+    catalog:
+      general:
+        agent-type: GENERAL
+        version: "1"
+        directive: "You are Hermes GeneralAgent. Respond concisely and helpfully."
+        model-profile: general-chat
+        name: General
+        description: "Default assistant for open-ended tasks."
+      concise:
+        agent-type: GENERAL
+        version: "1.1"
+        directive: "You are Hermes ConciseAgent. Respond in at most two short sentences, no preamble."
+        model-profile: general-chat
+        name: Concise
+        description: "Same capability as General, tuned for terse answers."
