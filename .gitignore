@@ -22,6 +22,13 @@ data/
 *.sqlite
 *.sqlite3
 
+# Generated documents (rebuilt from the .md sources with docs/tools/docgen)
+docs/*.pdf
+
+# Python
+__pycache__/
+*.pyc
+
 # IDE and OS
 .idea/
 *.iml
