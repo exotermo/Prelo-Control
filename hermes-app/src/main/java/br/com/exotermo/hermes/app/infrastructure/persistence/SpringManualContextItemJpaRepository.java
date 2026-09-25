@@ -1,0 +1,1 @@
+package br.com.exotermo.hermes.app.infrastructure.persistence; import java.util.*; import org.springframework.data.jpa.repository.JpaRepository; interface SpringManualContextItemJpaRepository extends JpaRepository<ManualContextItemEntity,UUID>{ List<ManualContextItemEntity> findByTaskIdOrderByItemOrderAsc(UUID taskId); }

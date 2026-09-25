@@ -1,0 +1,1 @@
+package br.com.exotermo.hermes.app.infrastructure.persistence; import java.util.*; import org.springframework.data.jpa.repository.JpaRepository; interface SpringContextSnapshotItemJpaRepository extends JpaRepository<ContextSnapshotItemEntity,UUID>{ List<ContextSnapshotItemEntity> findBySnapshotIdOrderByItemOrderAsc(UUID snapshotId); }
