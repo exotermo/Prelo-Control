@@ -192,3 +192,29 @@ Não há base para decidir ainda a plataforma de UI, linguagem, biblioteca de pe
 ## 17. Core Domain implementado
 
 O primeiro vertical slice implementa `Task → Context → Directive → GeneralAgent → HermesOrchestrator → LlmClient → Result`. As entidades em `domain` são Java puro; os casos de uso e portas estão em `application`; JPA/PostgreSQL e o adapter do contrato HTTP do Gateway estão em `infrastructure`. O Gateway permanece um serviço independente e não conhece Task, Agent ou orquestração do Hermes.
+
+## 18. Reescrita de hermes-app em Go (ADR-012) e execução assíncrona (ADR-013)
+
+`hermes-app` foi reescrito em Go (`hermes-app-go/`) e é o serviço de produção desde o cutover de 2026-09-23 (ver `CURRENT_STATE.md`); o módulo Java original está parqueado, código intacto, fora do `docker compose up` padrão. A mesma separação de camadas se aplica, com nomes de pacote Go: `internal/domain` (tipos puros, sem dependências), `internal/application` (casos de uso + portas como interfaces), `internal/infrastructure/{persistence,gateway,agentregistry,queue,worker,toolregistry,tools}` (implementações), `internal/api` (handlers HTTP). `llm-gateway` continua Java/Spring, inalterado.
+
+### 18.1 ToolRegistry, PermissionPolicy e aprovação (etapas 7/8, ADR-004)
+
+Só existe em `hermes-go` (nunca foi portado pro Java parqueado). `application.ToolRegistry` é um catálogo curado, boot-only, de `application.ToolExecutor` (par definição+código, mesma separação que `AgentRegistry`/`AgentDefinition`). Toda invocação passa por `application.PermissionPolicy.Evaluate`, que só decide `ALLOW`/`DENY`/`REQUIRE_APPROVAL` — nunca executa nada. `InvokeToolUseCase` grava um `domain.ToolCall` (auditoria) antes de qualquer execução, mesmo quando a decisão é `DENY`. Um `REQUIRE_APPROVAL` cria um `domain.ApprovalRequest` (ação+escopo+expiração, ADR-004) e não roda nada até `DecideApprovalUseCase.Approve` — que é o único caminho que efetivamente executa uma ferramenta de risco moderado/alto, e faz isso no mesmo passo em que registra o "sim" humano.
+
+A etapa 6.5 (execução assíncrona) acrescenta dois componentes novos ao fluxo de execução:
+
+```text
+POST /tasks/{id}/execute
+       │ 202 Accepted (fila apenas)
+       ▼
+EnqueueExecutionUseCase ── Postgres: Execution(PENDING) + ExecutionJob(PENDING) ── Task→QUEUED
+       │ XADD best-effort
+       ▼
+Redis Stream (despacho, não durável) ──┐
+                                        ▼
+                              Worker pool (goroutines) ── ProcessJobUseCase
+                                        ▲
+                              Sweeper (poll Postgres, crash-recovery, fallback sem Redis)
+```
+
+`ProcessJobUseCase` é o mesmo fluxo de orquestração de antes (`resolveAgent → prepareContext → compilePrompt → Gateway.chat → completar/falhar`), agora disparado pelo worker/sweeper em vez de pela requisição HTTP. Detalhes de claim atômico, idempotência e recuperação após restart estão na ADR-013.
