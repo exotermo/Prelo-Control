@@ -1,0 +1,94 @@
+package api
+
+import (
+	"context"
+	"encoding/json"
+	"net/http"
+
+	"github.com/google/uuid"
+
+	"github.com/exotermo/hermes-app-go/internal/application"
+	"github.com/exotermo/hermes-app-go/internal/domain"
+)
+
+type ApprovalHandler struct {
+	decide    *application.DecideApprovalUseCase
+	approvals application.ApprovalRepository
+}
+
+func NewApprovalHandler(decide *application.DecideApprovalUseCase, approvals application.ApprovalRepository) *ApprovalHandler {
+	return &ApprovalHandler{decide: decide, approvals: approvals}
+}
+
+// ListPending is the human-facing queue: every REQUIRE_APPROVAL tool call sits here, with its
+// human-readable Scope, until someone approves, denies, or its ExpiresAt passes.
+func (h *ApprovalHandler) ListPending(w http.ResponseWriter, r *http.Request) {
+	pending, err := h.approvals.ListPending(r.Context())
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	response := make([]approvalResponse, 0, len(pending))
+	for _, approval := range pending {
+		response = append(response, approvalResponseFrom(approval))
+	}
+	writeJSON(w, http.StatusOK, response)
+}
+
+func (h *ApprovalHandler) Get(w http.ResponseWriter, r *http.Request) {
+	id, err := parseApprovalID(r)
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	approval, err := h.approvals.FindByID(r.Context(), id)
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, approvalResponseFrom(approval))
+}
+
+func (h *ApprovalHandler) Approve(w http.ResponseWriter, r *http.Request) {
+	h.decideRequest(w, r, h.decide.Approve)
+}
+
+func (h *ApprovalHandler) Deny(w http.ResponseWriter, r *http.Request) {
+	h.decideRequest(w, r, h.decide.Deny)
+}
+
+func (h *ApprovalHandler) decideRequest(w http.ResponseWriter, r *http.Request, decide func(ctx context.Context, id domain.ApprovalRequestID, decidedBy string) (domain.ApprovalRequest, error)) {
+	id, err := parseApprovalID(r)
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+
+	var req decideApprovalRequest
+	if r.ContentLength != 0 {
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			writeError(w, &domain.ValidationError{Message: "invalid request body"})
+			return
+		}
+	}
+	decidedBy := req.DecidedBy
+	if decidedBy == "" {
+		decidedBy = "unknown"
+	}
+
+	approval, err := decide(r.Context(), id, decidedBy)
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, approvalResponseFrom(approval))
+}
+
+func parseApprovalID(r *http.Request) (domain.ApprovalRequestID, error) {
+	raw := r.PathValue("approvalId")
+	id, err := uuid.Parse(raw)
+	if err != nil {
+		return domain.ApprovalRequestID{}, &domain.ValidationError{Message: "approvalId must be a valid UUID"}
+	}
+	return domain.ApprovalRequestID{Value: id}, nil
+}
