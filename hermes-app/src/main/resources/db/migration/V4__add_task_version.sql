@@ -1,0 +1,2 @@
+ALTER TABLE tasks
+    ADD COLUMN task_version BIGINT NOT NULL DEFAULT 0;

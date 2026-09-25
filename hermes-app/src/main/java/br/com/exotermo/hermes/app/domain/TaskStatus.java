@@ -1,2 +1,2 @@
 package br.com.exotermo.hermes.app.domain;
-public enum TaskStatus { CREATED, RUNNING, COMPLETED, FAILED }
+public enum TaskStatus { CREATED, QUEUED, RUNNING, COMPLETED, FAILED }
