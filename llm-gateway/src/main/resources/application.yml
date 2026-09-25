@@ -27,3 +27,31 @@ gateway:
   provider:
     mock:
       enabled: ${GATEWAY_PROVIDER_MOCK_ENABLED:true}
+    anthropic:
+      enabled: ${GATEWAY_PROVIDER_ANTHROPIC_ENABLED:false}
+      base-url: ${GATEWAY_PROVIDER_ANTHROPIC_BASE_URL:https://api.anthropic.com}
+      api-key-file: ${GATEWAY_PROVIDER_ANTHROPIC_API_KEY_FILE:/run/secrets/anthropic_api_key}
+      models: ${GATEWAY_PROVIDER_ANTHROPIC_MODELS:claude-3-5-sonnet-latest,claude-3-5-haiku-latest}
+      timeout: ${GATEWAY_PROVIDER_ANTHROPIC_TIMEOUT:30s}
+      max-tokens: ${GATEWAY_PROVIDER_ANTHROPIC_MAX_TOKENS:1024}
+      api-version: "2023-06-01"
+  routing:
+    total-budget: 20s
+    retry-on-rate-limit: true
+    # No real Anthropic key is provisioned in this environment, so general-chat/dev-chat both
+    # resolve to MockProvider for now — this is an explicit config choice (dev-chat is the
+    # documented "mock is fine here" profile), not an implicit fallback. Once a real key +
+    # gateway.provider.anthropic.enabled=true are set, prepend anthropic:<model> to
+    # general-chat's candidates; leave dev-chat mock-only.
+    profiles:
+      general-chat:
+        candidates:
+          - mock:mock-echo
+      dev-chat:
+        candidates:
+          - mock:mock-echo
+      # Keeps the standalone /api/v1/llm/chat smoke test (see CURRENT_STATE.md) working with its
+      # historical literal "mock-echo" request body, now that modelProfile replaces a raw model.
+      mock-echo:
+        candidates:
+          - mock:mock-echo
