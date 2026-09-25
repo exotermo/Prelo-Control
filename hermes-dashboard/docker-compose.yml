@@ -1,0 +1,11 @@
+name: hermes-dashboard
+
+services:
+  dashboard:
+    build:
+      context: .
+      args:
+        VITE_HERMES_URL: ${VITE_HERMES_URL:-http://127.0.0.1:8082}
+    ports:
+      - "127.0.0.1:5176:80"
+    restart: unless-stopped
