@@ -13,12 +13,15 @@ public class GatewayAuditEvent {
     private String requestId;
     private String subject;
     private String clientId;
+    private String requestedProfile;
     private String provider;
     private String model;
+    private Integer attemptOrder;
     private Long durationMs;
     private String detail;
     protected GatewayAuditEvent() { }
-    GatewayAuditEvent(String type, String requestId, String subject, String clientId, String provider, String model, Long durationMs, String detail) {
-        this.id = UUID.randomUUID(); this.createdAt = Instant.now(); this.eventType = type; this.requestId = requestId; this.subject = subject; this.clientId = clientId; this.provider = provider; this.model = model; this.durationMs = durationMs; this.detail = detail;
+    GatewayAuditEvent(String type, String requestId, String subject, String clientId, String requestedProfile, String provider, String model, Integer attemptOrder, Long durationMs, String detail) {
+        this.id = UUID.randomUUID(); this.createdAt = Instant.now(); this.eventType = type; this.requestId = requestId; this.subject = subject; this.clientId = clientId;
+        this.requestedProfile = requestedProfile; this.provider = provider; this.model = model; this.attemptOrder = attemptOrder; this.durationMs = durationMs; this.detail = detail;
     }
 }

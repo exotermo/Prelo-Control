@@ -6,7 +6,7 @@ import org.springframework.stereotype.Service;
 public class AuditService {
     private final GatewayAuditRepository repository;
     AuditService(GatewayAuditRepository repository) { this.repository = repository; }
-    public void record(String type, String requestId, String subject, String clientId, String provider, String model, Long durationMs, String detail) {
-        repository.save(new GatewayAuditEvent(type, requestId, subject, clientId, provider, model, durationMs, detail));
+    public void record(String type, String requestId, String subject, String clientId, String requestedProfile, String provider, String model, Integer attemptOrder, Long durationMs, String detail) {
+        repository.save(new GatewayAuditEvent(type, requestId, subject, clientId, requestedProfile, provider, model, attemptOrder, durationMs, detail));
     }
 }

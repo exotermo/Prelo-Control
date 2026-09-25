@@ -45,7 +45,7 @@ class LlmControllerSecurityTest {
     static final String AUDIENCE = "llm-gateway-test-audience";
     private static final String OTHER_SECRET = "a-completely-different-test-secret-0000000000000";
     private static final String CHAT_REQUEST_BODY = """
-        {"model":"mock-echo","messages":[{"role":"user","content":"hi"}]}
+        {"modelProfile":"mock-echo","messages":[{"role":"user","content":"hi"}]}
         """;
 
     @Autowired private MockMvc mockMvc;
@@ -115,7 +115,7 @@ class LlmControllerSecurityTest {
 
     @Test void rejectsAMessageThatExceedsTheContentSizeLimit() throws Exception {
         String oversizedContent = "x".repeat(32_001);
-        String body = "{\"model\":\"mock-echo\",\"messages\":[{\"role\":\"user\",\"content\":\"" + oversizedContent + "\"}]}";
+        String body = "{\"modelProfile\":\"mock-echo\",\"messages\":[{\"role\":\"user\",\"content\":\"" + oversizedContent + "\"}]}";
 
         mockMvc.perform(post("/api/v1/llm/chat").contentType(MediaType.APPLICATION_JSON).content(body)
                 .header("Authorization", "Bearer " + token(List.of("llm:invoke"), Instant.now().plusSeconds(60), ISSUER, AUDIENCE, SECRET)))
