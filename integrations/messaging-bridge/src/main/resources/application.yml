@@ -1,0 +1,30 @@
+server:
+  port: 8095
+spring:
+  application:
+    name: hermes-messaging-bridge
+  datasource:
+    url: ${BRIDGE_DB_URL:jdbc:postgresql://localhost:5432/bridge}
+    username: ${BRIDGE_DB_USER:bridge}
+    password: ${BRIDGE_DB_PASSWORD:}
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info
+bridge:
+  messaging-core-url: ${MESSAGING_CORE_URL:}
+  messaging-core-client-id: ${MESSAGING_CORE_CLIENT_ID:}
+  messaging-core-client-secret: ${MESSAGING_CORE_CLIENT_SECRET:}
+  callback-signing-secret: ${CALLBACK_SIGNING_SECRET:}
+  hermes-app-url: ${HERMES_APP_URL:}
+  # Fail closed: both this explicit deployment opt-in and the runtime switch must be enabled.
+  auto-reply-enabled: ${BRIDGE_AUTO_REPLY_ENABLED:false}
+  admin-token: ${BRIDGE_ADMIN_TOKEN:}
+  # E.164 numbers (comma-separated) routed to the "general" agent (full capabilities); every
+  # other sender gets "customer" (no tool capabilities) — see AgentRouter.
+  owner-contacts: ${BRIDGE_OWNER_CONTACTS:}
+  callback-replay-tolerance-seconds: ${BRIDGE_CALLBACK_REPLAY_TOLERANCE_SECONDS:300}
+  # Legacy body-only signatures are disabled by default. Enable temporarily only while all
+  # callback subscriptions are migrated to contractVersion=2.
+  allow-legacy-callback-signatures: ${BRIDGE_ALLOW_LEGACY_CALLBACK_SIGNATURES:false}
