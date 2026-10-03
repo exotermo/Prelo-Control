@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
@@ -59,6 +60,40 @@ func (r *ApprovalRepository) ListPending(ctx context.Context) ([]domain.Approval
 	rows, err := r.pool.Query(ctx, `
 		SELECT id, tool_call_id, scope, status, requested_at, expires_at, decided_at, decided_by, approval_version
 		  FROM approval_requests WHERE status = 'PENDING' ORDER BY requested_at`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var results []domain.ApprovalRequest
+	for rows.Next() {
+		approval, err := scanApproval(rows)
+		if err != nil {
+			return nil, err
+		}
+		results = append(results, approval)
+	}
+	return results, rows.Err()
+}
+
+// ListPendingByProject backs the Fase W project-scoped Aprovações page. Unlike every other
+// ...ByProject method in this package, it needs a JOIN — approval_requests carries no
+// project_id of its own, only a tool_call_id, and a ToolCall's Task is what's actually scoped.
+// nil projectID means the "unassigned" bucket (tasks.project_id IS NULL).
+func (r *ApprovalRepository) ListPendingByProject(ctx context.Context, projectID *uuid.UUID) ([]domain.ApprovalRequest, error) {
+	const base = `
+		SELECT ar.id, ar.tool_call_id, ar.scope, ar.status, ar.requested_at, ar.expires_at, ar.decided_at, ar.decided_by, ar.approval_version
+		  FROM approval_requests ar
+		  JOIN tool_calls tc ON tc.id = ar.tool_call_id
+		  JOIN tasks t ON t.id = tc.task_id
+		 WHERE ar.status = 'PENDING'`
+	var rows pgx.Rows
+	var err error
+	if projectID == nil {
+		rows, err = r.pool.Query(ctx, base+" AND t.project_id IS NULL ORDER BY ar.requested_at")
+	} else {
+		rows, err = r.pool.Query(ctx, base+" AND t.project_id = $1 ORDER BY ar.requested_at", *projectID)
+	}
 	if err != nil {
 		return nil, err
 	}

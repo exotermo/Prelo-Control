@@ -30,22 +30,24 @@ func (r *TaskRepository) Insert(ctx context.Context, task domain.Task) error {
 		tenantID = task.TenantID
 	}
 	_, err := r.pool.Exec(ctx, `
-		INSERT INTO tasks (id, tenant_id, description, status, created_at, agent_id, task_version, parent_task_id, depth)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
-		task.ID.Value, tenantID, task.Description, string(task.Status), task.CreatedAt, task.AgentID.Value, task.Version, parentTaskID, task.Depth)
+		INSERT INTO tasks (id, tenant_id, project_id, description, status, created_at, agent_id, task_version, parent_task_id, depth, source)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`,
+		task.ID.Value, tenantID, projectIDValue(task.ProjectID), task.Description, string(task.Status), task.CreatedAt, task.AgentID.Value, task.Version, parentTaskID, task.Depth, string(task.Source))
 	return err
 }
 
+const taskSelectColumns = "id, tenant_id, project_id, description, status, created_at, agent_id, task_version, parent_task_id, depth, source"
+
 func (r *TaskRepository) FindByID(ctx context.Context, id domain.TaskID) (domain.Task, error) {
 	row := r.pool.QueryRow(ctx, `
-		SELECT id, tenant_id, description, status, created_at, agent_id, task_version, parent_task_id, depth
+		SELECT `+taskSelectColumns+`
 		  FROM tasks WHERE id = $1`, id.Value)
 	return scanTask(row)
 }
 
 func (r *TaskRepository) FindByIDForTenant(ctx context.Context, id domain.TaskID, tenantID string) (domain.Task, error) {
 	row := r.pool.QueryRow(ctx, `
-		SELECT id, tenant_id, description, status, created_at, agent_id, task_version, parent_task_id, depth
+		SELECT `+taskSelectColumns+`
 		  FROM tasks WHERE id = $1 AND tenant_id = $2`, id.Value, tenantID)
 	return scanTask(row)
 }
@@ -55,7 +57,7 @@ func (r *TaskRepository) FindByIDForTenant(ctx context.Context, id domain.TaskID
 // task spawned".
 func (r *TaskRepository) FindChildren(ctx context.Context, parentID domain.TaskID) ([]domain.Task, error) {
 	rows, err := r.pool.Query(ctx, `
-		SELECT id, tenant_id, description, status, created_at, agent_id, task_version, parent_task_id, depth
+		SELECT `+taskSelectColumns+`
 		  FROM tasks WHERE parent_task_id = $1 ORDER BY created_at`, parentID.Value)
 	if err != nil {
 		return nil, err
@@ -79,7 +81,7 @@ func (r *TaskRepository) FindChildren(ctx context.Context, parentID domain.TaskI
 // it, only lookup-by-id.
 func (r *TaskRepository) ListRoots(ctx context.Context, limit int) ([]domain.Task, error) {
 	rows, err := r.pool.Query(ctx, `
-		SELECT id, tenant_id, description, status, created_at, agent_id, task_version, parent_task_id, depth
+		SELECT `+taskSelectColumns+`
 		  FROM tasks WHERE parent_task_id IS NULL ORDER BY created_at DESC LIMIT $1`, limit)
 	if err != nil {
 		return nil, err
@@ -99,8 +101,89 @@ func (r *TaskRepository) ListRoots(ctx context.Context, limit int) ([]domain.Tas
 
 func (r *TaskRepository) ListRootsForTenant(ctx context.Context, tenantID string, limit int) ([]domain.Task, error) {
 	rows, err := r.pool.Query(ctx, `
-		SELECT id, tenant_id, description, status, created_at, agent_id, task_version, parent_task_id, depth
+		SELECT `+taskSelectColumns+`
 		  FROM tasks WHERE parent_task_id IS NULL AND tenant_id = $1 ORDER BY created_at DESC LIMIT $2`, tenantID, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var tasks []domain.Task
+	for rows.Next() {
+		task, err := scanTask(rows)
+		if err != nil {
+			return nil, err
+		}
+		tasks = append(tasks, task)
+	}
+	return tasks, rows.Err()
+}
+
+// ListActiveRoots backs the Pipeline page (Fase P) — root tasks that are not yet terminal
+// (CREATED/QUEUED/RUNNING), newest first. A root being non-terminal is exactly what makes its
+// whole delegation subtree worth showing on a "what's happening right now" view — once it's
+// COMPLETED/FAILED, so is everything it ever delegated.
+func (r *TaskRepository) ListActiveRoots(ctx context.Context, limit int) ([]domain.Task, error) {
+	rows, err := r.pool.Query(ctx, `
+		SELECT `+taskSelectColumns+`
+		  FROM tasks
+		 WHERE parent_task_id IS NULL AND status IN ('CREATED','QUEUED','RUNNING')
+		 ORDER BY created_at DESC LIMIT $1`, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var tasks []domain.Task
+	for rows.Next() {
+		task, err := scanTask(rows)
+		if err != nil {
+			return nil, err
+		}
+		tasks = append(tasks, task)
+	}
+	return tasks, rows.Err()
+}
+
+func (r *TaskRepository) ListActiveRootsForTenant(ctx context.Context, tenantID string, limit int) ([]domain.Task, error) {
+	rows, err := r.pool.Query(ctx, `
+		SELECT `+taskSelectColumns+`
+		  FROM tasks
+		 WHERE parent_task_id IS NULL AND tenant_id = $1 AND status IN ('CREATED','QUEUED','RUNNING')
+		 ORDER BY created_at DESC LIMIT $2`, tenantID, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var tasks []domain.Task
+	for rows.Next() {
+		task, err := scanTask(rows)
+		if err != nil {
+			return nil, err
+		}
+		tasks = append(tasks, task)
+	}
+	return tasks, rows.Err()
+}
+
+// ListRootsByProject and ListActiveRootsByProject back the Fase W project-scoped Tasks/Pipeline
+// pages — nil projectID means the "unassigned" bucket (project_id IS NULL), matching every
+// pre-Fase-W task. Additive methods (not a signature change to ListRoots/ListActiveRoots): the
+// messaging-bridge tenant path never knows about Project and always wants the unassigned bucket.
+func (r *TaskRepository) ListRootsByProject(ctx context.Context, projectID *uuid.UUID, limit int) ([]domain.Task, error) {
+	return r.queryTasksByProject(ctx, "parent_task_id IS NULL", projectID, limit)
+}
+
+func (r *TaskRepository) ListActiveRootsByProject(ctx context.Context, projectID *uuid.UUID, limit int) ([]domain.Task, error) {
+	return r.queryTasksByProject(ctx, "parent_task_id IS NULL AND status IN ('CREATED','QUEUED','RUNNING')", projectID, limit)
+}
+
+func (r *TaskRepository) queryTasksByProject(ctx context.Context, whereClause string, projectID *uuid.UUID, limit int) ([]domain.Task, error) {
+	var rows pgx.Rows
+	var err error
+	if projectID == nil {
+		rows, err = r.pool.Query(ctx, `SELECT `+taskSelectColumns+` FROM tasks WHERE `+whereClause+` AND project_id IS NULL ORDER BY created_at DESC LIMIT $1`, limit)
+	} else {
+		rows, err = r.pool.Query(ctx, `SELECT `+taskSelectColumns+` FROM tasks WHERE `+whereClause+` AND project_id = $1 ORDER BY created_at DESC LIMIT $2`, *projectID, limit)
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -118,10 +201,11 @@ func (r *TaskRepository) ListRootsForTenant(ctx context.Context, tenantID string
 
 func scanTask(row pgx.Row) (domain.Task, error) {
 	var t domain.Task
-	var status, agentID string
+	var status, agentID, source string
 	var tenantID *uuid.UUID
+	var projectID *uuid.UUID
 	var parentTaskID *uuid.UUID
-	if err := row.Scan(&t.ID.Value, &tenantID, &t.Description, &status, &t.CreatedAt, &agentID, &t.Version, &parentTaskID, &t.Depth); err != nil {
+	if err := row.Scan(&t.ID.Value, &tenantID, &projectID, &t.Description, &status, &t.CreatedAt, &agentID, &t.Version, &parentTaskID, &t.Depth, &source); err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return domain.Task{}, application.ErrTaskNotFound
 		}
@@ -131,11 +215,16 @@ func scanTask(row pgx.Row) (domain.Task, error) {
 	if tenantID != nil {
 		t.TenantID = tenantID.String()
 	}
+	if projectID != nil {
+		id := domain.ProjectID{Value: *projectID}
+		t.ProjectID = &id
+	}
 	t.AgentID = domain.AgentID{Value: agentID}
 	if parentTaskID != nil {
 		id := domain.TaskID{Value: *parentTaskID}
 		t.ParentTaskID = &id
 	}
+	t.Source = domain.TaskSource(source)
 	return t, nil
 }
 

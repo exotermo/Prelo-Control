@@ -20,6 +20,18 @@ func NewContextSnapshotID() ContextSnapshotID { return ContextSnapshotID{Value: 
 
 func (id ContextSnapshotID) String() string { return id.Value.String() }
 
+type ServerID struct{ Value uuid.UUID }
+
+func NewServerID() ServerID { return ServerID{Value: uuid.New()} }
+
+func (id ServerID) String() string { return id.Value.String() }
+
+type ProjectID struct{ Value uuid.UUID }
+
+func NewProjectID() ProjectID { return ProjectID{Value: uuid.New()} }
+
+func (id ProjectID) String() string { return id.Value.String() }
+
 // AgentID mirrors AgentId — a required, non-blank string, not a UUID.
 type AgentID struct{ Value string }
 
