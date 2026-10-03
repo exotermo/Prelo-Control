@@ -7,6 +7,7 @@ import (
 
 	"github.com/exotermo/hermes-app-go/internal/application"
 	"github.com/exotermo/hermes-app-go/internal/domain"
+	"github.com/exotermo/hermes-app-go/internal/infrastructure/bridgeclient"
 	"github.com/exotermo/hermes-app-go/internal/infrastructure/gateway"
 )
 
@@ -48,6 +49,21 @@ func mapError(err error) (int, string, string) {
 	if errors.Is(err, application.ErrApprovalNotFound) {
 		return http.StatusNotFound, "approval_not_found", "approval request not found"
 	}
+	if errors.Is(err, application.ErrServerNotFound) {
+		return http.StatusNotFound, "server_not_found", "server not found"
+	}
+	if errors.Is(err, application.ErrApiKeyNotFound) {
+		return http.StatusNotFound, "api_key_not_found", "api key not found"
+	}
+	if errors.Is(err, application.ErrWebhookNotFound) {
+		return http.StatusNotFound, "webhook_not_found", "webhook not found"
+	}
+	if errors.Is(err, application.ErrProjectFileNotFound) {
+		return http.StatusNotFound, "file_not_found", "file not found"
+	}
+	if errors.Is(err, application.ErrProjectNotFound) {
+		return http.StatusNotFound, "project_not_found", "project not found"
+	}
 	var toolLimit *application.ToolLimitError
 	if errors.As(err, &toolLimit) {
 		return http.StatusRequestEntityTooLarge, "tool_limit_exceeded", "tool input or output exceeded the configured safety limit"
@@ -59,6 +75,16 @@ func mapError(err error) (int, string, string) {
 	var callErr *gateway.CallError
 	if errors.As(err, &callErr) {
 		return http.StatusBadGateway, "gateway_failure", callErr.Message
+	}
+	var bridgeErr *bridgeclient.CallError
+	if errors.As(err, &bridgeErr) {
+		if bridgeErr.Status == http.StatusUnprocessableEntity {
+			return http.StatusUnprocessableEntity, "invalid_phone_number", bridgeErr.Message
+		}
+		return http.StatusBadGateway, "bridge_failure", bridgeErr.Message
+	}
+	if status, code, message, ok := mapDashboardAuthError(err); ok {
+		return status, code, message
 	}
 	return http.StatusInternalServerError, "internal_error", "an unexpected error occurred"
 }

@@ -12,7 +12,11 @@ import (
 type ContextResolver struct {
 	manualContext ManualContextRepository
 	snapshots     ContextSnapshotRepository
+	projects      ProjectReader
 }
+
+// SetProjectReader makes every task of a project carry its instructions (Fase PA) as a context item.
+func (r *ContextResolver) SetProjectReader(projects ProjectReader) { r.projects = projects }
 
 func NewContextResolver(manualContext ManualContextRepository, snapshots ContextSnapshotRepository) *ContextResolver {
 	return &ContextResolver{manualContext: manualContext, snapshots: snapshots}
@@ -25,11 +29,21 @@ func (r *ContextResolver) Resolve(ctx context.Context, task domain.Task) (domain
 	}
 	items := []domain.ContextSnapshotItem{descriptionItem}
 
+	if task.ProjectID != nil && r.projects != nil {
+		if project, err := r.projects.FindByID(ctx, *task.ProjectID); err == nil && project.Instructions != nil {
+			item, err := domain.NewContextSnapshotItem("instruções do projeto", *project.Instructions, domain.ContextSourceManual, "project-instructions", len(items))
+			if err != nil {
+				return domain.ContextSnapshot{}, err
+			}
+			items = append(items, item)
+		}
+	}
+
 	manualItems, err := r.manualContext.FindByTaskID(ctx, task.ID)
 	if err != nil {
 		return domain.ContextSnapshot{}, err
 	}
-	order := 1
+	order := len(items)
 	for _, item := range manualItems {
 		snapshotItem, err := domain.NewContextSnapshotItem(item.Name, item.Content, domain.ContextSourceManual, "manual-input", order)
 		if err != nil {
