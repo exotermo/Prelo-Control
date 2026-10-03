@@ -35,6 +35,14 @@ gateway:
       timeout: ${GATEWAY_PROVIDER_ANTHROPIC_TIMEOUT:30s}
       max-tokens: ${GATEWAY_PROVIDER_ANTHROPIC_MAX_TOKENS:1024}
       api-version: "2023-06-01"
+  # Fase M: dashboard-managed provider connections (instance default + per-project), keys sealed
+  # with a master key read from a Docker secret. Without that file, connections are disabled.
+  connections:
+    master-key-file: ${GATEWAY_CONNECTIONS_MASTER_KEY_FILE:/run/secrets/gateway_connections_key}
+    allow-private-urls: ${GATEWAY_CONNECTIONS_ALLOW_PRIVATE_URLS:false}
+    chat-timeout: ${GATEWAY_CONNECTIONS_CHAT_TIMEOUT:60s}
+    test-timeout: 10s
+    max-tokens: ${GATEWAY_CONNECTIONS_MAX_TOKENS:1024}
   routing:
     total-budget: 20s
     retry-on-rate-limit: true

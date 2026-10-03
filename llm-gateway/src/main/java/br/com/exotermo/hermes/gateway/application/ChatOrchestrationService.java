@@ -12,6 +12,10 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
+import java.util.UUID;
+import br.com.exotermo.hermes.gateway.connection.ConnectionRouter;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
 // Fallback is a Gateway-owned, configuration-driven decision: Hermes only ever sends a
@@ -23,16 +27,26 @@ public class ChatOrchestrationService {
     private final FallbackPlanResolver plans;
     private final Map<String, LLMProvider> providersById;
     private final AuditService audit;
+    private final ConnectionRouter connections;
 
     public ChatOrchestrationService(FallbackPlanResolver plans, List<LLMProvider> providers, AuditService audit) {
+        this(plans, providers, audit, ConnectionRouter.NONE);
+    }
+
+    @Autowired
+    public ChatOrchestrationService(FallbackPlanResolver plans, List<LLMProvider> providers, AuditService audit, ConnectionRouter connections) {
         this.plans = plans;
         this.audit = audit;
+        this.connections = connections;
         Map<String, LLMProvider> byId = new HashMap<>();
         providers.forEach(provider -> byId.put(provider.id(), provider));
         this.providersById = Map.copyOf(byId);
     }
 
     public LLMResponse execute(LLMRequest request, String requestId, String subject, String clientId) {
+        UUID projectId = request.projectUuid();
+        Optional<ConnectionRouter.RoutedConnection> routed = connections.route(projectId);
+        if (routed.isPresent()) return executeConnection(routed.get(), request, requestId, subject, clientId, projectId);
         String profile = request.modelProfile();
         List<ProviderCandidate> candidates = plans.resolve(profile);
         Instant overallStart = Instant.now();
@@ -62,7 +76,8 @@ public class ChatOrchestrationService {
                 attempts.add(new AttemptSummary(candidate.providerId(), candidate.model(), order, "success"));
                 audit.record("PROVIDER_ATTEMPT", requestId, subject, clientId, profile, candidate.providerId(), candidate.model(), order, attemptDuration, "success");
                 long totalDuration = Duration.between(overallStart, Instant.now()).toMillis();
-                audit.record("LLM_RESPONSE", requestId, subject, clientId, profile, response.provider(), response.model(), order, totalDuration, "completed");
+                audit.recordResponse(requestId, subject, clientId, profile, response.provider(), response.model(), order, totalDuration, projectId,
+                    response.usage() == null ? null : response.usage().inputTokens(), response.usage() == null ? null : response.usage().outputTokens());
                 return new LLMResponse(response.id(), response.provider(), response.model(), response.kind(), response.content(),
                     response.toolUseId(), response.toolName(), response.toolArgsJson(), response.usage(), totalDuration, requestId, List.copyOf(attempts));
             } catch (RuntimeException exception) {
@@ -80,6 +95,29 @@ public class ChatOrchestrationService {
         audit.record("PROVIDER_FAILURE", requestId, subject, clientId, profile, null, null, attempts.size(), totalDuration,
             lastFailure == null ? "no candidates configured" : lastFailure.getClass().getSimpleName());
         throw new FallbackExhaustedException(profile, attempts, lastFailure);
+    }
+
+    // Fase M: a dashboard-managed connection is a single, explicit choice (the project's own or
+    // the instance default) — no silent fallback to another provider; a failure surfaces as-is so
+    // the operator sees that *their* connection is broken.
+    private LLMResponse executeConnection(ConnectionRouter.RoutedConnection connection, LLMRequest request, String requestId,
+                                          String subject, String clientId, UUID projectId) {
+        String label = "connection:" + connection.scope().toLowerCase();
+        Instant started = Instant.now();
+        try {
+            LLMResponse response = connection.call().apply(request);
+            long duration = Duration.between(started, Instant.now()).toMillis();
+            audit.record("PROVIDER_ATTEMPT", requestId, subject, clientId, label, connection.provider(), connection.model(), 1, duration, "success");
+            audit.recordResponse(requestId, subject, clientId, label, response.provider(), response.model(), 1, duration, projectId,
+                response.usage() == null ? null : response.usage().inputTokens(), response.usage() == null ? null : response.usage().outputTokens());
+            return new LLMResponse(response.id(), response.provider(), response.model(), response.kind(), response.content(),
+                response.toolUseId(), response.toolName(), response.toolArgsJson(), response.usage(), duration, requestId,
+                List.of(new AttemptSummary(connection.provider(), connection.model(), 1, "success")));
+        } catch (RuntimeException exception) {
+            long duration = Duration.between(started, Instant.now()).toMillis();
+            audit.record("PROVIDER_ATTEMPT", requestId, subject, clientId, label, connection.provider(), connection.model(), 1, duration, exception.getClass().getSimpleName());
+            throw exception;
+        }
     }
 
     // Only these transitive/backend failures are eligible for fallback. Everything else
