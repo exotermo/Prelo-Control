@@ -13,7 +13,9 @@ import (
 
 const (
 	connectTimeout = 5 * time.Second
-	requestTimeout = 10 * time.Second
+	// Real models (Fase M connections) can take tens of seconds to answer; the gateway itself
+	// caps a connection call at 60s, so this only needs to outlast that.
+	requestTimeout = 75 * time.Second
 )
 
 type Config struct {

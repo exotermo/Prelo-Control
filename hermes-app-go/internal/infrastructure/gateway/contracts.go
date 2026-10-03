@@ -13,6 +13,9 @@ type ChatRequest struct {
 	// LLMRequest.ToolSpec's doc on the Java side for why. Nil/empty means "no tools offered",
 	// exactly like today.
 	Tools []ToolSpec `json:"tools,omitempty"`
+	// ProjectID (Fase M) lets the gateway pick the project's own model connection (else the
+	// instance default). Empty for unassigned tasks.
+	ProjectID string `json:"projectId,omitempty"`
 }
 
 type ToolSpec struct {

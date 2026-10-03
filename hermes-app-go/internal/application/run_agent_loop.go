@@ -56,10 +56,14 @@ type RunAgentLoopUseCase struct {
 	turns       ExecutionTurnRepository
 	suspensions ExecutionSuspensionRepository
 	jobs        ExecutionJobRepository
+	events      EventPublisher
 }
 
+// SetEventPublisher wires Fase I's approval.pending webhook event.
+func (uc *RunAgentLoopUseCase) SetEventPublisher(events EventPublisher) { uc.events = events }
+
 func NewRunAgentLoopUseCase(llmGateway LanguageModelGateway, tools ToolRegistry, invokeTool *InvokeToolUseCase, turns ExecutionTurnRepository, suspensions ExecutionSuspensionRepository, jobs ExecutionJobRepository) *RunAgentLoopUseCase {
-	return &RunAgentLoopUseCase{llmGateway: llmGateway, tools: tools, invokeTool: invokeTool, turns: turns, suspensions: suspensions, jobs: jobs}
+	return &RunAgentLoopUseCase{llmGateway: llmGateway, tools: tools, invokeTool: invokeTool, turns: turns, suspensions: suspensions, jobs: jobs, events: NoopEventPublisher{}}
 }
 
 // Run is safe to call again for the same Execution after a resume: it always rebuilds its
@@ -140,6 +144,9 @@ func (uc *RunAgentLoopUseCase) Run(ctx context.Context, task domain.Task, agent 
 			Tools:        toolSpecs,
 			Metadata:     map[string]string{"taskId": task.ID.String(), "agentId": agent.AgentID.String()},
 		}
+		if task.ProjectID != nil {
+			chatReq.ProjectID = task.ProjectID.String()
+		}
 		resp, err := uc.llmGateway.Chat(ctx, chatReq, requestID)
 		if err != nil {
 			// Logged with full detail (server-side only); persisted with the sanitized message
@@ -199,6 +206,10 @@ func (uc *RunAgentLoopUseCase) Run(ctx context.Context, task domain.Task, agent 
 				return LoopResult{}, err
 			}
 			log.Printf("agent-loop: execution=%s turn=%d suspended reason=APPROVAL approvalId=%s", execution.ID, toolTurnNumber, approvalID)
+			uc.events.Publish(ctx, task.ProjectID, domain.EventApprovalPending, map[string]any{
+				"taskId": task.ID.String(), "executionId": execution.ID.String(), "approvalId": approvalID.String(),
+				"tool": resp.ToolName, "description": task.Description,
+			})
 			return LoopResult{Outcome: LoopSuspended}, nil
 
 		case domain.DecisionDeny:
