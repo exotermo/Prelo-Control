@@ -23,11 +23,28 @@ const MaxDelegationDepth = 3
 var taskRunnableFrom = map[TaskStatus]bool{TaskCreated: true, TaskQueued: true}
 var taskTerminalFrom = map[TaskStatus]bool{TaskRunning: true}
 
+// TaskSource distinguishes a Task a human (or an API caller acting on their behalf) explicitly
+// asked for from one that exists only because an inbound message arrived on some channel (today,
+// exclusively WhatsApp via hermes-messaging-bridge) — the dashboard's Tasks list uses this to stop
+// showing every WhatsApp exchange as if it were manually "designated" work (found 2026-10-02: the
+// bridge's one-task-per-inbound-message design meant every chat line — "oi", "?", ... — appeared
+// in Tasks indistinguishable from real ones).
+type TaskSource string
+
+const (
+	TaskSourceManual    TaskSource = "MANUAL"
+	TaskSourceMessaging TaskSource = "MESSAGING"
+	defaultTaskSource              = TaskSourceManual
+)
+
 type Task struct {
 	ID TaskID
 	// TenantID is populated for tasks created through the authenticated API. Legacy/internal
 	// tasks may be empty while they are migrated; API lookups never expose those rows to a tenant.
-	TenantID     string
+	TenantID string
+	// ProjectID scopes this task to one Fase W project; nil means the "unassigned" bucket
+	// (every task created before Fase W, or created with no project context selected).
+	ProjectID    *ProjectID
 	Description  string
 	Status       TaskStatus
 	CreatedAt    time.Time
@@ -35,6 +52,7 @@ type Task struct {
 	Version      int64
 	ParentTaskID *TaskID
 	Depth        int
+	Source       TaskSource
 }
 
 func NewTask(description string, agentID AgentID) (Task, error) {
@@ -51,7 +69,16 @@ func NewTask(description string, agentID AgentID) (Task, error) {
 		CreatedAt:   time.Now().UTC(),
 		AgentID:     agentID,
 		Version:     0,
+		Source:      defaultTaskSource,
 	}, nil
+}
+
+// WithSource overrides the default MANUAL source — used by CreateTaskUseCase when the caller
+// (hermes-messaging-bridge, via the ordinary POST /api/v1/tasks it already calls) identifies
+// itself as a messaging channel instead of a human-facing client.
+func (t Task) WithSource(source TaskSource) Task {
+	t.Source = source
+	return t
 }
 
 // NewSubtask is the only way a Task ends up with a ParentTaskID — created by the
@@ -70,6 +97,8 @@ func NewSubtask(description string, agentID AgentID, parent Task) (Task, error) 
 	task.ParentTaskID = &parentID
 	task.Depth = parent.Depth + 1
 	task.TenantID = parent.TenantID
+	task.ProjectID = parent.ProjectID
+	task.Source = parent.Source
 	return task, nil
 }
 

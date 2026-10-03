@@ -21,9 +21,10 @@ func NewApprovalHandler(decide *application.DecideApprovalUseCase, approvals app
 }
 
 // ListPending is the human-facing queue: every REQUIRE_APPROVAL tool call sits here, with its
-// human-readable Scope, until someone approves, denies, or its ExpiresAt passes.
+// human-readable Scope, until someone approves, denies, or its ExpiresAt passes. Project-scoped
+// (Fase W) — projectIdentity(ctx) nil means the "unassigned" bucket.
 func (h *ApprovalHandler) ListPending(w http.ResponseWriter, r *http.Request) {
-	pending, err := h.approvals.ListPending(r.Context())
+	pending, err := h.approvals.ListPendingByProject(r.Context(), projectIdentity(r.Context()))
 	if err != nil {
 		writeError(w, err)
 		return

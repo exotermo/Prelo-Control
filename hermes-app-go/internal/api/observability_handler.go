@@ -51,7 +51,7 @@ func (h *ObservabilityHandler) Turns(w http.ResponseWriter, r *http.Request) {
 		writeError(w, application.ErrExecutionNotFound)
 		return
 	}
-	if identity, ok := FromContext(r.Context()); ok {
+	if identity, ok := tenantIdentity(r.Context()); ok {
 		if scoped, supported := h.tasks.(tenantTaskReader); !supported {
 			writeError(w, &domain.ValidationError{Message: "tenant-scoped task storage is unavailable"})
 			return
@@ -59,6 +59,9 @@ func (h *ObservabilityHandler) Turns(w http.ResponseWriter, r *http.Request) {
 			writeError(w, application.ErrExecutionNotFound)
 			return
 		}
+	} else if task, err := h.tasks.FindByID(r.Context(), domain.TaskID{Value: taskID}); err != nil || !taskVisibleToCaller(r.Context(), task) {
+		writeError(w, application.ErrExecutionNotFound)
+		return
 	}
 
 	turns, err := h.turns.ListByExecution(r.Context(), execution.ID)
@@ -86,7 +89,7 @@ func (h *ObservabilityHandler) Tree(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var root domain.Task
-	if identity, ok := FromContext(r.Context()); ok {
+	if identity, ok := tenantIdentity(r.Context()); ok {
 		scoped, supported := h.tasks.(tenantTaskReader)
 		if !supported {
 			writeError(w, &domain.ValidationError{Message: "tenant-scoped task storage is unavailable"})
@@ -95,6 +98,9 @@ func (h *ObservabilityHandler) Tree(w http.ResponseWriter, r *http.Request) {
 		root, err = scoped.FindByIDForTenant(r.Context(), domain.TaskID{Value: taskID}, identity.TenantID)
 	} else {
 		root, err = h.tasks.FindByID(r.Context(), domain.TaskID{Value: taskID})
+		if err == nil && !taskVisibleToCaller(r.Context(), root) {
+			err = application.ErrTaskNotFound
+		}
 	}
 	if err != nil {
 		writeError(w, err)

@@ -5,6 +5,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/google/uuid"
+
 	"github.com/exotermo/hermes-app-go/internal/domain"
 )
 
@@ -133,6 +135,9 @@ func (f *fakeApprovals) ListPending(context.Context) ([]domain.ApprovalRequest, 
 	}
 	return result, nil
 }
+func (f *fakeApprovals) ListPendingByProject(context.Context, *uuid.UUID) ([]domain.ApprovalRequest, error) {
+	return f.ListPending(context.Background())
+}
 
 type fakeTurns struct {
 	turns map[string]domain.ExecutionTurn
@@ -180,6 +185,14 @@ func (f *fakeSuspensions) Insert(_ context.Context, s domain.ExecutionSuspension
 func (f *fakeSuspensions) FindActiveByResumeKey(_ context.Context, reason domain.SuspensionReason, resumeKey string) (domain.ExecutionSuspension, bool, error) {
 	for _, s := range f.suspensions {
 		if s.Reason == reason && s.ResumeKey == resumeKey && s.ResolvedAt == nil {
+			return s, true, nil
+		}
+	}
+	return domain.ExecutionSuspension{}, false, nil
+}
+func (f *fakeSuspensions) FindActiveByExecutionID(_ context.Context, executionID domain.ExecutionID) (domain.ExecutionSuspension, bool, error) {
+	for _, s := range f.suspensions {
+		if s.ExecutionID == executionID && s.ResolvedAt == nil {
 			return s, true, nil
 		}
 	}

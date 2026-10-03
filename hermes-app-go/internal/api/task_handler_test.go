@@ -10,6 +10,8 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/google/uuid"
+
 	"github.com/exotermo/hermes-app-go/internal/application"
 	"github.com/exotermo/hermes-app-go/internal/domain"
 )
@@ -65,11 +67,95 @@ func (f *fakeTaskRepo) ListRoots(_ context.Context, limit int) ([]domain.Task, e
 	return roots, nil
 }
 
+func (f *fakeTaskRepo) ListActiveRoots(_ context.Context, limit int) ([]domain.Task, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	var roots []domain.Task
+	for _, t := range f.tasks {
+		if t.ParentTaskID == nil && t.Status != domain.TaskCompleted && t.Status != domain.TaskFailed {
+			roots = append(roots, t)
+		}
+	}
+	if len(roots) > limit {
+		roots = roots[:limit]
+	}
+	return roots, nil
+}
+
+func matchesProject(t domain.Task, projectID *uuid.UUID) bool {
+	if projectID == nil {
+		return t.ProjectID == nil
+	}
+	return t.ProjectID != nil && t.ProjectID.Value == *projectID
+}
+
+func (f *fakeTaskRepo) ListRootsByProject(_ context.Context, projectID *uuid.UUID, limit int) ([]domain.Task, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	var roots []domain.Task
+	for _, t := range f.tasks {
+		if t.ParentTaskID == nil && matchesProject(t, projectID) {
+			roots = append(roots, t)
+		}
+	}
+	if len(roots) > limit {
+		roots = roots[:limit]
+	}
+	return roots, nil
+}
+
+func (f *fakeTaskRepo) ListActiveRootsByProject(_ context.Context, projectID *uuid.UUID, limit int) ([]domain.Task, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	var roots []domain.Task
+	for _, t := range f.tasks {
+		if t.ParentTaskID == nil && t.Status != domain.TaskCompleted && t.Status != domain.TaskFailed && matchesProject(t, projectID) {
+			roots = append(roots, t)
+		}
+	}
+	if len(roots) > limit {
+		roots = roots[:limit]
+	}
+	return roots, nil
+}
+
 func (f *fakeTaskRepo) Update(_ context.Context, task domain.Task) (domain.Task, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.tasks[task.ID.String()] = task
 	return task, nil
+}
+
+// fakeTenantTaskRepo additionally implements tenantTaskReader, so tests can exercise the
+// tenant-scoped branch of TaskHandler (and, per tenantIdentity, confirm a dashboard session
+// never takes it even when an identity is present in the request context).
+type fakeTenantTaskRepo struct{ *fakeTaskRepo }
+
+func newFakeTenantTaskRepo() *fakeTenantTaskRepo { return &fakeTenantTaskRepo{newFakeTaskRepo()} }
+
+func (f *fakeTenantTaskRepo) FindByIDForTenant(ctx context.Context, id domain.TaskID, tenantID string) (domain.Task, error) {
+	task, err := f.FindByID(ctx, id)
+	if err != nil {
+		return domain.Task{}, err
+	}
+	if task.TenantID != tenantID {
+		return domain.Task{}, application.ErrTaskNotFound
+	}
+	return task, nil
+}
+
+func (f *fakeTenantTaskRepo) ListRootsForTenant(ctx context.Context, tenantID string, limit int) ([]domain.Task, error) {
+	all, err := f.ListRoots(ctx, limit)
+	if err != nil {
+		return nil, err
+	}
+	var scoped []domain.Task
+	for _, t := range all {
+		if t.TenantID == tenantID {
+			scoped = append(scoped, t)
+		}
+	}
+	return scoped, nil
 }
 
 type fakeExecutionRepo struct {
@@ -191,6 +277,58 @@ func TestTaskHandler_Create_UnknownAgent(t *testing.T) {
 	_ = json.Unmarshal(rec.Body.Bytes(), &errResp)
 	if errResp.Code != "unknown_agent" {
 		t.Fatalf("expected code unknown_agent, got %s", errResp.Code)
+	}
+}
+
+// Regression coverage for 2026-10-02: every inbound WhatsApp message was showing up in
+// hermes-dashboard's Tasks list indistinguishable from a task someone actually designated —
+// see domain.TaskSource.
+func TestTaskHandler_Create_DefaultsSourceToManual(t *testing.T) {
+	handler, _, _ := newTestTaskHandler()
+	mux := http.NewServeMux()
+	RegisterRoutes(mux, handler, NewChatHandler(nil), &ToolHandler{}, &ApprovalHandler{}, &ObservabilityHandler{})
+
+	body := `{"description":"do the thing"}`
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/tasks", strings.NewReader(body))
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, req)
+
+	var resp taskResponse
+	_ = json.Unmarshal(rec.Body.Bytes(), &resp)
+	if resp.Source != "MANUAL" {
+		t.Fatalf("expected source MANUAL by default, got %q", resp.Source)
+	}
+}
+
+func TestTaskHandler_Create_AcceptsMessagingSource(t *testing.T) {
+	handler, _, _ := newTestTaskHandler()
+	mux := http.NewServeMux()
+	RegisterRoutes(mux, handler, NewChatHandler(nil), &ToolHandler{}, &ApprovalHandler{}, &ObservabilityHandler{})
+
+	body := `{"description":"responder no whatsapp","source":"MESSAGING"}`
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/tasks", strings.NewReader(body))
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, req)
+
+	var resp taskResponse
+	_ = json.Unmarshal(rec.Body.Bytes(), &resp)
+	if resp.Source != "MESSAGING" {
+		t.Fatalf("expected source MESSAGING, got %q", resp.Source)
+	}
+}
+
+func TestTaskHandler_Create_RejectsUnknownSource(t *testing.T) {
+	handler, _, _ := newTestTaskHandler()
+	mux := http.NewServeMux()
+	RegisterRoutes(mux, handler, NewChatHandler(nil), &ToolHandler{}, &ApprovalHandler{}, &ObservabilityHandler{})
+
+	body := `{"description":"do the thing","source":"BOGUS"}`
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/tasks", strings.NewReader(body))
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d: %s", rec.Code, rec.Body.String())
 	}
 }
 
@@ -378,5 +516,86 @@ func TestTaskHandler_List_OnlyReturnsRootTasks(t *testing.T) {
 	}
 	if len(resp) != 1 || resp[0].ID != root.ID.String() {
 		t.Fatalf("expected only the root task, got %+v", resp)
+	}
+}
+
+// --- Fase G1 regression: a dashboard session must never be routed through tenant scoping ---
+
+func withIdentity(req *http.Request, identity AuthContext) *http.Request {
+	return req.WithContext(context.WithValue(req.Context(), authContextKey{}, identity))
+}
+
+func TestTaskHandler_Create_TenantIdentity_IsScopedToThatTenant(t *testing.T) {
+	repo := newFakeTenantTaskRepo()
+	createUseCase := application.NewCreateTaskUseCase(repo, fakeManualContextRepo{}, newFakeAgentRegistry())
+	handler := NewTaskHandler(createUseCase, repo, newFakeExecutionRepo(), nil)
+	mux := http.NewServeMux()
+	RegisterRoutes(mux, handler, NewChatHandler(nil), &ToolHandler{}, &ApprovalHandler{}, &ObservabilityHandler{})
+
+	req := withIdentity(httptest.NewRequest(http.MethodPost, "/api/v1/tasks", strings.NewReader(`{"description":"scoped"}`)),
+		AuthContext{TokenUse: "integration", TenantID: "11111111-1111-1111-1111-111111111111"})
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("expected 201, got %d: %s", rec.Code, rec.Body.String())
+	}
+	if len(repo.tasks) != 1 {
+		t.Fatalf("expected exactly one task stored, got %d", len(repo.tasks))
+	}
+	for _, task := range repo.tasks {
+		if task.TenantID != "11111111-1111-1111-1111-111111111111" {
+			t.Fatalf("expected the task to carry the caller's tenant id, got %q", task.TenantID)
+		}
+	}
+}
+
+func TestTaskHandler_Create_DashboardSession_IsNeverTenantScoped(t *testing.T) {
+	repo := newFakeTenantTaskRepo()
+	createUseCase := application.NewCreateTaskUseCase(repo, fakeManualContextRepo{}, newFakeAgentRegistry())
+	handler := NewTaskHandler(createUseCase, repo, newFakeExecutionRepo(), nil)
+	mux := http.NewServeMux()
+	RegisterRoutes(mux, handler, NewChatHandler(nil), &ToolHandler{}, &ApprovalHandler{}, &ObservabilityHandler{})
+
+	// A dashboard session carries no tenant at all — CreateForTenant would reject an empty
+	// tenant id with a validation error; the handler must route it through the unscoped Create
+	// instead (see tenantIdentity's doc comment).
+	req := withIdentity(httptest.NewRequest(http.MethodPost, "/api/v1/tasks", strings.NewReader(`{"description":"from the console"}`)),
+		AuthContext{TokenUse: "dashboard", Subject: "some-user-id"})
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("expected 201, got %d: %s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestTaskHandler_List_DashboardSession_SeesTasksAcrossEveryTenant(t *testing.T) {
+	repo := newFakeTenantTaskRepo()
+	agentID, _ := domain.NewAgentID("general")
+	taskA, _ := domain.NewTask("tenant A's task", agentID)
+	taskA.TenantID = "aaaaaaaa-1111-1111-1111-111111111111"
+	_ = repo.Insert(context.Background(), taskA)
+	taskB, _ := domain.NewTask("tenant B's task", agentID)
+	taskB.TenantID = "bbbbbbbb-2222-2222-2222-222222222222"
+	_ = repo.Insert(context.Background(), taskB)
+
+	handler := NewTaskHandler(nil, repo, newFakeExecutionRepo(), nil)
+	mux := http.NewServeMux()
+	RegisterRoutes(mux, handler, NewChatHandler(nil), &ToolHandler{}, &ApprovalHandler{}, &ObservabilityHandler{})
+
+	req := withIdentity(httptest.NewRequest(http.MethodGet, "/api/v1/tasks", nil), AuthContext{TokenUse: "dashboard", Subject: "some-user-id"})
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+	var resp []taskResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("failed to decode response: %v", err)
+	}
+	if len(resp) != 2 {
+		t.Fatalf("expected a dashboard session to see both tenants' tasks, got %+v", resp)
 	}
 }

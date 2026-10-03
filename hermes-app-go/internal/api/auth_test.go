@@ -14,7 +14,7 @@ import (
 
 func testAuth(t *testing.T) *JWTAuthMiddleware {
 	t.Helper()
-	middleware, err := NewJWTAuthMiddleware(config.APIAuthConfig{Enabled: true, Secret: "api-test-secret", Issuer: "messaging-core", Audience: "hermes-app-go", ClockSkewSeconds: 0})
+	middleware, err := NewJWTAuthMiddleware(config.APIAuthConfig{Enabled: true, Secret: "api-test-secret", Issuer: "messaging-core", Audience: "hermes-app-go", ClockSkewSeconds: 0}, nil, nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -124,6 +124,17 @@ func TestRequiredScopeRouteMatrix(t *testing.T) {
 		"GET /api/v1/approvals":                       "approvals:read",
 		"POST /api/v1/approvals/1/approve":            "approvals:decide",
 		"GET /api/v1/tasks/1/tree":                    "observability:read",
+		"GET /api/v1/users":                           "users:manage",
+		"POST /api/v1/users":                          "users:manage",
+		"PUT /api/v1/users/1/role":                    "users:manage",
+		"GET /api/v1/settings/owner-contacts":         "settings:manage",
+		"PUT /api/v1/settings/owner-contacts":         "settings:manage",
+		"GET /api/v1/projects":                        "projects:read",
+		"POST /api/v1/projects":                       "projects:manage",
+		"DELETE /api/v1/projects/1":                   "projects:manage",
+		"GET /api/v1/projects/1/members":              "projects:manage",
+		"POST /api/v1/projects/1/members":             "projects:manage",
+		"DELETE /api/v1/projects/1/members/2":         "projects:manage",
 	}
 	for route, expected := range cases {
 		parts := strings.SplitN(route, " ", 2)

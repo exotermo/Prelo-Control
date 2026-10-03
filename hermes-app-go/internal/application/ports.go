@@ -5,6 +5,8 @@ import (
 	"errors"
 	"time"
 
+	"github.com/google/uuid"
+
 	"github.com/exotermo/hermes-app-go/internal/domain"
 	"github.com/exotermo/hermes-app-go/internal/infrastructure/gateway"
 )
@@ -33,6 +35,13 @@ type TaskRepository interface {
 	// ListRoots backs the Fase E dashboard's task list — top-level tasks only (a delegated
 	// sub-task shows up via its parent's tree, not here), newest first, capped at limit.
 	ListRoots(ctx context.Context, limit int) ([]domain.Task, error)
+	// ListActiveRoots backs the Fase P Pipeline page — top-level tasks whose Status is not yet
+	// terminal (CREATED/QUEUED/RUNNING), newest first, capped at limit.
+	ListActiveRoots(ctx context.Context, limit int) ([]domain.Task, error)
+	// ListRootsByProject/ListActiveRootsByProject back the Fase W project-scoped Tasks/Pipeline
+	// pages — nil projectID means the "unassigned" bucket (project_id IS NULL).
+	ListRootsByProject(ctx context.Context, projectID *uuid.UUID, limit int) ([]domain.Task, error)
+	ListActiveRootsByProject(ctx context.Context, projectID *uuid.UUID, limit int) ([]domain.Task, error)
 }
 
 type ExecutionRepository interface {
@@ -144,6 +153,9 @@ type ApprovalRepository interface {
 	FindByID(ctx context.Context, id domain.ApprovalRequestID) (domain.ApprovalRequest, error)
 	Update(ctx context.Context, approval domain.ApprovalRequest) (domain.ApprovalRequest, error)
 	ListPending(ctx context.Context) ([]domain.ApprovalRequest, error)
+	// ListPendingByProject backs the Fase W project-scoped Aprovações page — nil projectID
+	// means the "unassigned" bucket (joins through tool_calls/tasks, see the Postgres impl).
+	ListPendingByProject(ctx context.Context, projectID *uuid.UUID) ([]domain.ApprovalRequest, error)
 }
 
 // ExecutionJobRepository mirrors the etapa 6.5 queue design: Insert creates a PENDING job
@@ -202,6 +214,9 @@ type ExecutionSuspensionRepository interface {
 	// FindActiveByResumeKey is how a resolver (approval decided, sub-task completed) finds
 	// which suspended execution, if any, is waiting on it — ResolvedAt IS NULL.
 	FindActiveByResumeKey(ctx context.Context, reason domain.SuspensionReason, resumeKey string) (domain.ExecutionSuspension, bool, error)
+	// FindActiveByExecutionID is the reverse direction — the Fase P Pipeline page's "is this
+	// execution suspended right now, and why?" lookup.
+	FindActiveByExecutionID(ctx context.Context, executionID domain.ExecutionID) (domain.ExecutionSuspension, bool, error)
 	// Resolve is guarded to only succeed once — two concurrent resolvers that both read the
 	// same suspension via FindActiveByResumeKey before either resolves it (e.g. a duplicate
 	// approval-decision delivery) must not both go on to call jobs.Resume for the same

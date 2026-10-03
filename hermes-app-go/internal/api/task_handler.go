@@ -73,12 +73,29 @@ func (h *TaskHandler) Create(w http.ResponseWriter, r *http.Request) {
 		agentID = &id
 	}
 
+	source := domain.TaskSourceManual
+	if req.Source != nil && *req.Source != "" {
+		switch domain.TaskSource(*req.Source) {
+		case domain.TaskSourceManual, domain.TaskSourceMessaging:
+			source = domain.TaskSource(*req.Source)
+		default:
+			writeError(w, &domain.ValidationError{Message: "source must be MANUAL or MESSAGING"})
+			return
+		}
+	}
+
+	var projectID *domain.ProjectID
+	if raw := projectIdentity(r.Context()); raw != nil {
+		id := domain.ProjectID{Value: *raw}
+		projectID = &id
+	}
+
 	var task domain.Task
 	var err error
-	if identity, ok := FromContext(r.Context()); ok {
-		task, err = h.create.CreateForTenant(r.Context(), identity.TenantID, req.Description, items, agentID)
+	if identity, ok := tenantIdentity(r.Context()); ok {
+		task, err = h.create.CreateForTenant(r.Context(), identity.TenantID, req.Description, items, agentID, source, projectID)
 	} else {
-		task, err = h.create.Create(r.Context(), req.Description, items, agentID)
+		task, err = h.create.Create(r.Context(), req.Description, items, agentID, source, projectID)
 	}
 	if err != nil {
 		writeError(w, err)
@@ -93,7 +110,7 @@ func (h *TaskHandler) Create(w http.ResponseWriter, r *http.Request) {
 func (h *TaskHandler) List(w http.ResponseWriter, r *http.Request) {
 	var tasks []domain.Task
 	var err error
-	if identity, ok := FromContext(r.Context()); ok {
+	if identity, ok := tenantIdentity(r.Context()); ok {
 		if scoped, supported := h.tasks.(tenantTaskReader); supported {
 			tasks, err = scoped.ListRootsForTenant(r.Context(), identity.TenantID, 50)
 		} else {
@@ -101,7 +118,9 @@ func (h *TaskHandler) List(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	} else {
-		tasks, err = h.tasks.ListRoots(r.Context(), 50)
+		// Dashboard session (Fase W): always project-scoped — projectIdentity(ctx) is nil for
+		// "no project selected", which resolves to the pre-Fase-W "unassigned" bucket.
+		tasks, err = h.tasks.ListRootsByProject(r.Context(), projectIdentity(r.Context()), 50)
 	}
 	if err != nil {
 		writeError(w, err)
@@ -218,13 +237,43 @@ func (h *TaskHandler) GetExecution(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *TaskHandler) findTask(r *http.Request, id domain.TaskID) (domain.Task, error) {
-	if identity, ok := FromContext(r.Context()); ok {
+	if identity, ok := tenantIdentity(r.Context()); ok {
 		if scoped, supported := h.tasks.(tenantTaskReader); supported {
 			return scoped.FindByIDForTenant(r.Context(), id, identity.TenantID)
 		}
 		return domain.Task{}, &domain.ValidationError{Message: "tenant-scoped task storage is unavailable"}
 	}
-	return h.tasks.FindByID(r.Context(), id)
+	task, err := h.tasks.FindByID(r.Context(), id)
+	if err != nil {
+		return domain.Task{}, err
+	}
+	if !taskVisibleToCaller(r.Context(), task) {
+		return domain.Task{}, application.ErrTaskNotFound
+	}
+	return task, nil
+}
+
+// taskVisibleToCaller confines an API key (Fase I) to its own project's tasks on every by-id
+// read — a key holder knowing some other task's UUID must get the same 404 as a wrong UUID.
+// Dashboard and tenant callers are unaffected (they have their own scoping paths).
+func taskVisibleToCaller(ctx context.Context, task domain.Task) bool {
+	identity, ok := FromContext(ctx)
+	if !ok || identity.TokenUse != tokenUseApiKey {
+		return true
+	}
+	return task.ProjectID != nil && identity.ProjectID != nil && task.ProjectID.Value == *identity.ProjectID
+}
+
+// tenantIdentity returns the caller's identity only when it actually carries a tenant to scope
+// by — a dashboard session (token_use="dashboard") is a human operator of this single Hermes
+// instance, not bound to any one messaging-core tenant, so it takes the same unscoped path as
+// having no auth context at all (full visibility across every tenant's tasks).
+func tenantIdentity(ctx context.Context) (AuthContext, bool) {
+	identity, ok := FromContext(ctx)
+	if !ok || identity.TokenUse == "dashboard" || identity.TokenUse == tokenUseApiKey {
+		return AuthContext{}, false
+	}
+	return identity, true
 }
 
 func executionResponseFrom(e domain.Execution) executionResponse {
@@ -251,11 +300,17 @@ func executionResponseFrom(e domain.Execution) executionResponse {
 }
 
 func taskResponseFrom(t domain.Task) taskResponse {
-	return taskResponse{
+	resp := taskResponse{
 		ID:          t.ID.String(),
 		Description: t.Description,
 		Status:      string(t.Status),
 		AgentID:     t.AgentID.String(),
 		CreatedAt:   t.CreatedAt.Format(time.RFC3339),
+		Source:      string(t.Source),
 	}
+	if t.ProjectID != nil {
+		id := t.ProjectID.String()
+		resp.ProjectID = &id
+	}
+	return resp
 }

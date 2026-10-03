@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/base64"
 	"log"
 	"net/http"
 	"os"
@@ -13,12 +14,19 @@ import (
 	"github.com/exotermo/hermes-app-go/internal/api"
 	"github.com/exotermo/hermes-app-go/internal/application"
 	"github.com/exotermo/hermes-app-go/internal/config"
+	"github.com/exotermo/hermes-app-go/internal/domain"
 	"github.com/exotermo/hermes-app-go/internal/infrastructure/agentregistry"
+	"github.com/exotermo/hermes-app-go/internal/infrastructure/bridgeclient"
+	"github.com/exotermo/hermes-app-go/internal/infrastructure/filestore"
 	appgateway "github.com/exotermo/hermes-app-go/internal/infrastructure/gateway"
+	"github.com/exotermo/hermes-app-go/internal/infrastructure/mail"
 	"github.com/exotermo/hermes-app-go/internal/infrastructure/persistence/postgres"
 	"github.com/exotermo/hermes-app-go/internal/infrastructure/queue"
+	"github.com/exotermo/hermes-app-go/internal/infrastructure/security"
+	serverssh "github.com/exotermo/hermes-app-go/internal/infrastructure/ssh"
 	"github.com/exotermo/hermes-app-go/internal/infrastructure/toolregistry"
 	"github.com/exotermo/hermes-app-go/internal/infrastructure/tools"
+	"github.com/exotermo/hermes-app-go/internal/infrastructure/webhook"
 	"github.com/exotermo/hermes-app-go/internal/infrastructure/worker"
 	"github.com/exotermo/hermes-app-go/internal/platform"
 )
@@ -27,16 +35,17 @@ func main() {
 	cfg := config.Load()
 	ctx := context.Background()
 
-	var authMiddleware *api.JWTAuthMiddleware
-	if cfg.APIAuth.Enabled {
-		var err error
-		authMiddleware, err = api.NewJWTAuthMiddleware(cfg.APIAuth)
-		if err != nil {
-			log.Fatalf("invalid API authentication configuration: %v", err)
-		}
-	} else if !cfg.APIAuth.AllowInsecureLocalOnly || !isLoopback(cfg.BindHost) {
+	if !cfg.APIAuth.Enabled && (!cfg.APIAuth.AllowInsecureLocalOnly || !isLoopback(cfg.BindHost)) {
 		log.Fatalf("API authentication cannot be disabled unless HERMES_GO_ALLOW_INSECURE_LOCAL_ONLY=true and HERMES_GO_BIND_HOST is loopback")
 	}
+
+	// projectRepo/projectMemberRepo (Fase W) are filled in below once the DB pool exists —
+	// JWTAuthMiddleware is only constructed after that, since resolveProject needs both.
+	var projectRepo *postgres.ProjectRepository
+	var projectMemberRepo *postgres.ProjectMemberRepository
+	// Fase I: stays a nil interface (not a typed nil pointer) unless integrations are configured,
+	// so the middleware cleanly rejects every "hk_" bearer in that case.
+	var apiKeyAuth api.ApiKeyAuthenticator
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /actuator/health", platform.HealthHandler())
@@ -132,10 +141,150 @@ func main() {
 		taskHandler := api.NewTaskHandler(createTask, taskRepo, executionRepo, enqueueExecution)
 		chatHandler := api.NewChatHandler(chatService)
 		observabilityHandler := api.NewObservabilityHandler(taskRepo, executionRepo, turnRepo)
+		pipelineHandler := api.NewPipelineHandler(taskRepo, executionRepo, suspensionRepo)
 
 		api.RegisterRoutes(mux, taskHandler, chatHandler, toolHandler, approvalHandler, observabilityHandler)
+		api.RegisterPipelineRoutes(mux, pipelineHandler)
+
+		// Fase G1: human login (password + mandatory TOTP) for hermes-dashboard.
+		if cfg.Dashboard.MfaKey == "" {
+			log.Fatal("HERMES_GO_DASHBOARD_MFA_KEY is required (32 random bytes, base64: openssl rand -base64 32)")
+		}
+		mfaCipher, err := security.NewMfaCipher(cfg.Dashboard.MfaKey)
+		if err != nil {
+			log.Fatalf("invalid HERMES_GO_DASHBOARD_MFA_KEY: %v", err)
+		}
+		dashboardUsers := postgres.NewDashboardUserRepository(pool)
+		dashboardTokens := postgres.NewDashboardAuthTokenRepository(pool)
+		dashboardRecoveryCodes := postgres.NewDashboardRecoveryCodeRepository(pool)
+		dashboardRateLimiter := postgres.NewDashboardRateLimiter(pool)
+		dashboardMailer := mail.NewSMTPMailer(mail.Config{
+			Host: cfg.Dashboard.SMTP.Host, Port: cfg.Dashboard.SMTP.Port, User: cfg.Dashboard.SMTP.User,
+			Password: cfg.Dashboard.SMTP.Password, Auth: cfg.Dashboard.SMTP.Auth, StartTLS: cfg.Dashboard.SMTP.StartTLS,
+			From: cfg.Dashboard.SMTP.From, PublicURL: cfg.Dashboard.PublicURL,
+		})
+		dashboardAuthService := application.NewDashboardAuthService(dashboardUsers, dashboardTokens, dashboardRecoveryCodes,
+			dashboardRateLimiter, dashboardMailer, mfaCipher, security.NewTotpProvider("Hermes"), security.NewPasswordHasher(),
+			api.NewDashboardSessionIssuer(cfg.APIAuth))
+		dashboardAuthHandler := api.NewDashboardAuthHandler(dashboardAuthService, cfg.Dashboard.SecureCookie)
+		dashboardBootstrapHandler := api.NewDashboardBootstrapHandler(dashboardAuthService, cfg.Dashboard.AdminToken)
+		api.RegisterDashboardAuthRoutes(mux, dashboardAuthHandler, dashboardBootstrapHandler)
+
+		// Fase H: role-gated multi-user management (Usuários page) — reuses DashboardAuthService's
+		// Invite/ListUsers/ChangeRole, same repository as login itself.
+		userManagementHandler := api.NewUserManagementHandler(dashboardAuthService)
+		api.RegisterUserManagementRoutes(mux, userManagementHandler)
+
+		// Fase G2: hermes-dashboard's Configurações page manages the bridge's owner-contacts
+		// list through this proxy — optional, hermes-go runs fine without HERMES_BRIDGE_ADMIN_*.
+		bridgeClient := bridgeclient.New(cfg.Bridge.AdminURL, cfg.Bridge.AdminToken)
+		if !bridgeClient.Configured() {
+			log.Print("HERMES_BRIDGE_ADMIN_URL/HERMES_BRIDGE_ADMIN_TOKEN not set, /api/v1/settings/owner-contacts will report the bridge integration as unconfigured")
+		}
+		settingsHandler := api.NewSettingsHandler(bridgeClient)
+		api.RegisterSettingsRoutes(mux, settingsHandler)
+
+		var checkServerHealthUC *application.CheckServerHealthUseCase
+		// Fase S1: server registration + on-demand SSH health check. Optional, same
+		// graceful-degradation pattern as the bridge integration — a fresh deployment that
+		// hasn't set the new key yet keeps running everything else.
+		if cfg.Servers.CredentialsKey == "" {
+			log.Print("HERMES_GO_SERVER_CREDENTIALS_KEY not set, /api/v1/servers is disabled")
+		} else {
+			serverCredentialCipher, err := security.NewMfaCipher(cfg.Servers.CredentialsKey)
+			if err != nil {
+				log.Fatalf("invalid HERMES_GO_SERVER_CREDENTIALS_KEY: %v", err)
+			}
+			serverRepo := postgres.NewServerRepository(pool)
+			registerServer := application.NewRegisterServerUseCase(serverRepo, serverssh.NewRegistrar(serverssh.DefaultTimeout), serverCredentialCipher)
+			checkServerHealth := application.NewCheckServerHealthUseCase(serverRepo, serverssh.NewChecker(serverCredentialCipher, serverssh.DefaultTimeout))
+			checkServerHealthUC = checkServerHealth
+			serverHandler := api.NewServerHandler(registerServer, checkServerHealth, serverRepo)
+			api.RegisterServerRoutes(mux, serverHandler)
+		}
+
+		// Fase W: projects (isolated work environments) scoping Tasks/Servers/Pipeline/
+		// Approvals. projectRepo/projectMemberRepo are also what JWTAuthMiddleware uses below
+		// to resolve X-Project-Id and enforce membership.
+		projectRepo = postgres.NewProjectRepository(pool)
+		projectMemberRepo = postgres.NewProjectMemberRepository(pool)
+		projectHandler := api.NewProjectHandler(projectRepo, projectMemberRepo)
+		api.RegisterProjectRoutes(mux, projectHandler)
+
+		// Fase PA: project settings (default agent, instructions) feed task creation and context.
+		createTask.SetProjectReader(projectRepo)
+		contextResolver.SetProjectReader(projectRepo)
+		var filePurger *application.ProjectFileService
+		if cfg.Files.Key == "" {
+			log.Print("HERMES_GO_FILES_KEY not set, project files are disabled")
+		} else {
+			filesKey, err := base64.StdEncoding.DecodeString(strings.TrimSpace(cfg.Files.Key))
+			if err != nil || len(filesKey) != 32 {
+				log.Fatal("invalid HERMES_GO_FILES_KEY (32 random bytes, base64: openssl rand -base64 32)")
+			}
+			store, err := filestore.NewStore(cfg.Files.Dir, filesKey)
+			if err != nil {
+				log.Fatalf("project files store: %v", err)
+			}
+			fileService := application.NewProjectFileService(postgres.NewProjectFileRepository(pool), filestore.Blobs{Store: store})
+			filePurger = fileService
+			api.RegisterProjectFileRoutes(mux, api.NewProjectFileHandler(fileService, projectRepo, projectMemberRepo))
+		}
+		// The registry also lists its catalog; the AgentRegistry port just doesn't expose it.
+		catalog, _ := agents.(agentLister)
+		if filePurger != nil {
+			projectHandler.SetSettingsDependencies(catalog, filePurger)
+		} else {
+			projectHandler.SetSettingsDependencies(catalog, nil)
+		}
+
+		// Fase M: model connections live in the llm-gateway's vault; hermes-go only relays them
+		// (never stores a provider key — AGENTS.md) using a separate llm:admin service token.
+		gatewayAdmin := appgateway.NewAdminClient(appgateway.Config{
+			BaseURL: cfg.Gateway.BaseURL, JWTSecret: cfg.Gateway.JWTSecret,
+			Issuer: cfg.Gateway.Issuer, Audience: cfg.Gateway.Audience,
+		})
+		api.RegisterModelConnectionRoutes(mux, api.NewModelConnectionHandler(gatewayAdmin, projectRepo, projectMemberRepo))
+
+		// Fase I: per-project API keys + outbound webhooks. Optional like Servers — without
+		// HERMES_GO_INTEGRATIONS_KEY the routes stay off and events publish nowhere.
+		if cfg.Integrations.Key == "" {
+			log.Print("HERMES_GO_INTEGRATIONS_KEY not set, /api/v1/integrations and webhooks are disabled")
+		} else {
+			integrationsCipher, err := security.NewMfaCipher(cfg.Integrations.Key)
+			if err != nil {
+				log.Fatalf("invalid HERMES_GO_INTEGRATIONS_KEY: %v", err)
+			}
+			if cfg.Integrations.AllowPrivateTargets {
+				log.Print("WARNING: HERMES_GO_WEBHOOK_ALLOW_PRIVATE_TARGETS=true — webhook SSRF guard is OFF (dev only)")
+			}
+			apiKeyRepo := postgres.NewApiKeyRepository(pool)
+			webhookRepo := postgres.NewWebhookRepository(pool)
+			deliveryRepo := postgres.NewWebhookDeliveryRepository(pool)
+			integrationService := application.NewIntegrationService(apiKeyRepo, webhookRepo, deliveryRepo, integrationsCipher, cfg.Integrations.AllowPrivateTargets)
+			apiKeyAuth = integrationService
+			api.RegisterIntegrationRoutes(mux, api.NewIntegrationHandler(integrationService))
+
+			dispatcher := application.NewWebhookDispatcher(webhookRepo, deliveryRepo)
+			processJob.SetEventPublisher(dispatcher)
+			agentLoop.SetEventPublisher(dispatcher)
+			if checkServerHealthUC != nil {
+				checkServerHealthUC.SetEventPublisher(dispatcher)
+			}
+			sender := webhook.NewSender(deliveryRepo, webhookRepo, integrationsCipher, webhook.NewHTTPClient(cfg.Integrations.AllowPrivateTargets), 3*time.Second, 20)
+			go sender.Run(ctx)
+		}
 	} else {
 		log.Print("HERMES_GO_DB_HOST not set, skipping migrations and API wiring")
+	}
+
+	var authMiddleware *api.JWTAuthMiddleware
+	if cfg.APIAuth.Enabled {
+		var err error
+		authMiddleware, err = api.NewJWTAuthMiddleware(cfg.APIAuth, projectRepo, projectMemberRepo, apiKeyAuth)
+		if err != nil {
+			log.Fatalf("invalid API authentication configuration: %v", err)
+		}
 	}
 
 	addr := cfg.BindHost + ":" + cfg.Port
@@ -144,9 +293,14 @@ func main() {
 	if authMiddleware != nil {
 		handler = authMiddleware.Handler(handler)
 	}
-	if err := http.ListenAndServe(addr, platform.CORS(handler)); err != nil {
+	if err := http.ListenAndServe(addr, platform.CORS(handler, cfg.Dashboard.AllowedOrigins)); err != nil {
 		log.Fatal(err)
 	}
+}
+
+type agentLister interface {
+	application.AgentRegistry
+	List() []domain.AgentDefinition
 }
 
 func isLoopback(host string) bool {

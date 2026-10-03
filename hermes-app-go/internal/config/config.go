@@ -8,14 +8,70 @@ import (
 )
 
 type Config struct {
-	Port        string
-	BindHost    string
-	Database    DatabaseConfig
-	Gateway     GatewayConfig
-	APIAuth     APIAuthConfig
-	RedisAddr   string
-	WorkerCount int
-	ToolLimits  ToolLimitsConfig
+	Port         string
+	BindHost     string
+	Database     DatabaseConfig
+	Gateway      GatewayConfig
+	APIAuth      APIAuthConfig
+	RedisAddr    string
+	WorkerCount  int
+	ToolLimits   ToolLimitsConfig
+	Dashboard    DashboardConfig
+	Bridge       BridgeConfig
+	Servers      ServersConfig
+	Integrations IntegrationsConfig
+	Files        FilesConfig
+}
+
+// FilesConfig backs Fase PA (project files sealed at rest). Key is its own 32-byte Base64 master
+// key — never shared with the TOTP, SSH or integrations keys. Without it, file routes are off.
+type FilesConfig struct {
+	Key string
+	Dir string
+}
+
+// IntegrationsConfig backs Fase I (API keys + outbound webhooks). Key is a dedicated 32-byte
+// Base64 key for webhook signing secrets — never shared with the TOTP or SSH-credential keys.
+// AllowPrivateTargets turns off the webhook SSRF guard (and allows plain http://); dev only.
+type IntegrationsConfig struct {
+	Key                 string
+	AllowPrivateTargets bool
+}
+
+// ServersConfig backs Fase S1 (server registration + health). CredentialsKey must be a
+// dedicated 32-byte Base64 key, never the same value as Dashboard.MfaKey — a server's SSH
+// private key and a human's TOTP secret must never share an encryption key.
+type ServersConfig struct {
+	CredentialsKey string
+}
+
+// BridgeConfig backs Fase G2 (hermes-dashboard's Configurações page managing
+// hermes-messaging-bridge's owner-contacts list). Optional: hermes-go runs fine without it, the
+// settings endpoints just report the integration as unconfigured.
+type BridgeConfig struct {
+	AdminURL   string
+	AdminToken string
+}
+
+// DashboardConfig backs the human-login surface (Fase G1) — separate from APIAuth, which
+// authenticates machine callers (messaging-core, the bridge).
+type DashboardConfig struct {
+	MfaKey         string
+	PublicURL      string
+	SecureCookie   bool
+	AdminToken     string
+	AllowedOrigins []string
+	SMTP           SMTPConfig
+}
+
+type SMTPConfig struct {
+	Host     string
+	Port     string
+	User     string
+	Password string
+	Auth     bool
+	StartTLS bool
+	From     string
 }
 
 // APIAuthConfig authenticates callers of hermes-go. It is intentionally separate from the
@@ -93,6 +149,37 @@ func Load() Config {
 		},
 		RedisAddr:   getenv("HERMES_GO_REDIS_ADDR", ""),
 		WorkerCount: getenvInt("HERMES_GO_WORKER_COUNT", 4),
+		Dashboard: DashboardConfig{
+			MfaKey:         getenv("HERMES_GO_DASHBOARD_MFA_KEY", ""),
+			PublicURL:      getenv("HERMES_GO_DASHBOARD_PUBLIC_URL", "http://127.0.0.1:5176"),
+			SecureCookie:   getenvBool("HERMES_GO_DASHBOARD_SECURE_COOKIE", false),
+			AdminToken:     getenv("HERMES_GO_ADMIN_TOKEN", ""),
+			AllowedOrigins: getenvList("HERMES_GO_DASHBOARD_ALLOWED_ORIGINS", "http://127.0.0.1:5176,http://localhost:5176"),
+			SMTP: SMTPConfig{
+				Host:     getenv("HERMES_GO_SMTP_HOST", ""),
+				Port:     getenv("HERMES_GO_SMTP_PORT", "587"),
+				User:     getenv("HERMES_GO_SMTP_USER", ""),
+				Password: getenv("HERMES_GO_SMTP_PASSWORD", ""),
+				Auth:     getenvBool("HERMES_GO_SMTP_AUTH", true),
+				StartTLS: getenvBool("HERMES_GO_SMTP_STARTTLS", true),
+				From:     getenv("HERMES_GO_DASHBOARD_MAIL_FROM", ""),
+			},
+		},
+		Bridge: BridgeConfig{
+			AdminURL:   getenv("HERMES_BRIDGE_ADMIN_URL", ""),
+			AdminToken: getenv("HERMES_BRIDGE_ADMIN_TOKEN", ""),
+		},
+		Servers: ServersConfig{
+			CredentialsKey: getenv("HERMES_GO_SERVER_CREDENTIALS_KEY", ""),
+		},
+		Files: FilesConfig{
+			Key: getenv("HERMES_GO_FILES_KEY", ""),
+			Dir: getenv("HERMES_GO_FILES_DIR", "/data/project-files"),
+		},
+		Integrations: IntegrationsConfig{
+			Key:                 getenv("HERMES_GO_INTEGRATIONS_KEY", ""),
+			AllowPrivateTargets: getenvBool("HERMES_GO_WEBHOOK_ALLOW_PRIVATE_TARGETS", false),
+		},
 	}
 }
 
@@ -141,4 +228,19 @@ func getenv(key, fallback string) string {
 		return v
 	}
 	return fallback
+}
+
+// getenvList splits a comma-separated env var, trimming whitespace and dropping empty entries —
+// used for HERMES_GO_DASHBOARD_ALLOWED_ORIGINS (an explicit allowlist, never "*", since the
+// dashboard session cookie makes this a credentialed CORS policy).
+func getenvList(key, fallback string) []string {
+	raw := getenv(key, fallback)
+	parts := strings.Split(raw, ",")
+	result := make([]string, 0, len(parts))
+	for _, p := range parts {
+		if trimmed := strings.TrimSpace(p); trimmed != "" {
+			result = append(result, trimmed)
+		}
+	}
+	return result
 }

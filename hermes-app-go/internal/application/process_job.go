@@ -38,6 +38,7 @@ type ProcessJobUseCase struct {
 	turns       ExecutionTurnRepository
 	suspensions ExecutionSuspensionRepository
 	workerID    string
+	events      EventPublisher
 }
 
 // loop owns the actual Gateway calls now (Fase B) — ProcessJobUseCase only owns claiming the
@@ -49,7 +50,30 @@ func NewProcessJobUseCase(tasks TaskRepository, executions ExecutionRepository, 
 	return &ProcessJobUseCase{
 		tasks: tasks, executions: executions, jobs: jobs, agents: agents,
 		resolver: resolver, snapshots: snapshots, loop: loop, turns: turns, suspensions: suspensions, workerID: workerID,
+		events: NoopEventPublisher{},
 	}
+}
+
+// SetEventPublisher wires Fase I's webhook fan-out; without it, terminal transitions publish
+// nowhere (NoopEventPublisher).
+func (uc *ProcessJobUseCase) SetEventPublisher(events EventPublisher) { uc.events = events }
+
+func taskEventData(task domain.Task, execution domain.Execution) map[string]any {
+	data := map[string]any{
+		"taskId": task.ID.String(), "executionId": execution.ID.String(), "agentId": task.AgentID.String(),
+		"description": task.Description, "status": string(task.Status),
+	}
+	if execution.Result != nil {
+		result := *execution.Result
+		if len(result) > 8000 {
+			result = result[:8000]
+		}
+		data["result"] = result
+	}
+	if execution.Error != nil {
+		data["error"] = *execution.Error
+	}
+	return data
 }
 
 // ProcessExecution claims and processes exactly one job. A lost claim (another worker, or a
@@ -181,6 +205,7 @@ func (uc *ProcessJobUseCase) ProcessExecution(ctx context.Context, executionID d
 		if err := uc.jobs.MarkDone(ctx, executionID); err != nil {
 			return domain.Execution{}, err
 		}
+		uc.events.Publish(ctx, completedTask.ProjectID, domain.EventTaskCompleted, taskEventData(completedTask, updated))
 		if err := uc.resolveParentSubtaskSuspension(ctx, updated.TaskID, updated); err != nil {
 			return domain.Execution{}, err
 		}
@@ -276,6 +301,7 @@ func (uc *ProcessJobUseCase) failExecution(ctx context.Context, running domain.T
 	if err := uc.jobs.MarkFailed(ctx, execution.ID, message); err != nil {
 		return domain.Execution{}, err
 	}
+	uc.events.Publish(ctx, failedTask.ProjectID, domain.EventTaskFailed, taskEventData(failedTask, updated))
 	if err := uc.resolveParentSubtaskSuspension(ctx, updated.TaskID, updated); err != nil {
 		return domain.Execution{}, err
 	}
