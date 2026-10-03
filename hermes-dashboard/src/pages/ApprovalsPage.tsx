@@ -1,7 +1,11 @@
 import { useEffect, useState } from "react";
 import { ApiError, approveRequest, denyRequest, listPendingApprovals, type ApprovalRequest } from "../api/client";
+import { useAuth } from "../auth/AuthContext";
+import { useProject } from "../context/ProjectContext";
 
 export function ApprovalsPage() {
+  const { token } = useAuth();
+  const { projectId } = useProject();
   const [approvals, setApprovals] = useState<ApprovalRequest[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -9,10 +13,11 @@ export function ApprovalsPage() {
   const [busyId, setBusyId] = useState<string | null>(null);
 
   async function refresh() {
+    if (!token) return;
     setLoading(true);
     setError(null);
     try {
-      setApprovals(await listPendingApprovals());
+      setApprovals(await listPendingApprovals(token, projectId ?? undefined));
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "Falha ao carregar aprovações.");
     } finally {
@@ -24,14 +29,16 @@ export function ApprovalsPage() {
     void refresh();
     const interval = setInterval(() => void refresh(), 4000);
     return () => clearInterval(interval);
-  }, []);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [token, projectId]);
 
   async function decide(id: string, action: "approve" | "deny") {
+    if (!token) return;
     setBusyId(id);
     setError(null);
     try {
-      if (action === "approve") await approveRequest(id, decidedBy || "operador");
-      else await denyRequest(id, decidedBy || "operador");
+      if (action === "approve") await approveRequest(token, id, decidedBy || "operador");
+      else await denyRequest(token, id, decidedBy || "operador");
       await refresh();
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "Falha ao decidir aprovação.");

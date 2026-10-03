@@ -13,12 +13,17 @@ import {
   type TaskTreeNode,
   type Turn,
 } from "../api/client";
+import { useAuth } from "../auth/AuthContext";
+import { useProject } from "../context/ProjectContext";
+import { PipelineTimeline } from "../components/PipelineTimeline";
 
 function statusBadge(status: string) {
   return <span className={`badge badge-${status.toLowerCase()}`}>{status}</span>;
 }
 
 export function TasksPage() {
+  const { token } = useAuth();
+  const { projectId } = useProject();
   const [tasks, setTasks] = useState<Task[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -27,12 +32,14 @@ export function TasksPage() {
   const [description, setDescription] = useState("");
   const [agentId, setAgentId] = useState("");
   const [creating, setCreating] = useState(false);
+  const [showMessaging, setShowMessaging] = useState(false);
 
   async function refresh() {
+    if (!token) return;
     setLoading(true);
     setError(null);
     try {
-      setTasks(await listTasks());
+      setTasks(await listTasks(token, projectId ?? undefined));
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "Falha ao carregar tasks.");
     } finally {
@@ -42,15 +49,16 @@ export function TasksPage() {
 
   useEffect(() => {
     void refresh();
-  }, []);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [token, projectId]);
 
   async function handleCreate(event: React.FormEvent) {
     event.preventDefault();
-    if (!description.trim()) return;
+    if (!description.trim() || !token) return;
     setCreating(true);
     setError(null);
     try {
-      const task = await createTask(description.trim(), agentId.trim() || undefined);
+      const task = await createTask(token, description.trim(), agentId.trim() || undefined, undefined, projectId ?? undefined);
       setDescription("");
       setAgentId("");
       await refresh();
@@ -61,6 +69,9 @@ export function TasksPage() {
       setCreating(false);
     }
   }
+
+  const messagingTasks = tasks.filter((t) => t.source === "MESSAGING");
+  const visibleTasks = showMessaging ? tasks : tasks.filter((t) => t.source !== "MESSAGING");
 
   return (
     <div className="task-layout">
@@ -94,8 +105,10 @@ export function TasksPage() {
 
         {error && <p className="error">{error}</p>}
 
-        {!loading && tasks.length === 0 ? (
-          <div className="empty-state">Nenhuma task ainda. Crie uma acima.</div>
+        {!loading && visibleTasks.length === 0 ? (
+          <div className="empty-state">
+            {tasks.length === 0 ? "Nenhuma task ainda. Crie uma acima." : "Nenhuma task designada — só mensagens do WhatsApp (veja abaixo)."}
+          </div>
         ) : (
           <table>
             <thead>
@@ -107,7 +120,7 @@ export function TasksPage() {
               </tr>
             </thead>
             <tbody>
-              {tasks.map((task) => (
+              {visibleTasks.map((task) => (
                 <tr key={task.id} className="clickable" onClick={() => setSelectedId(task.id)}>
                   <td>{task.description}</td>
                   <td className="mono">{task.agentId}</td>
@@ -118,6 +131,15 @@ export function TasksPage() {
             </tbody>
           </table>
         )}
+
+        {messagingTasks.length > 0 && (
+          <button
+            onClick={() => setShowMessaging((v) => !v)}
+            style={{ marginTop: 14, fontSize: 13 }}
+          >
+            {showMessaging ? "Ocultar mensagens do WhatsApp" : `Mostrar mensagens do WhatsApp (${messagingTasks.length})`}
+          </button>
+        )}
       </div>
 
       {selectedId && <TaskDetail taskId={selectedId} onTaskChanged={refresh} />}
@@ -126,6 +148,7 @@ export function TasksPage() {
 }
 
 function TaskDetail({ taskId, onTaskChanged }: { taskId: string; onTaskChanged: () => void }) {
+  const { token } = useAuth();
   const [task, setTask] = useState<Task | null>(null);
   const [execution, setExecution] = useState<Execution | null>(null);
   const [turns, setTurns] = useState<Turn[]>([]);
@@ -134,15 +157,16 @@ function TaskDetail({ taskId, onTaskChanged }: { taskId: string; onTaskChanged: 
   const [executing, setExecuting] = useState(false);
 
   async function load() {
+    if (!token) return;
     setError(null);
     try {
-      const [taskData, treeData] = await Promise.all([getTask(taskId), getTaskTree(taskId)]);
+      const [taskData, treeData] = await Promise.all([getTask(token, taskId), getTaskTree(token, taskId)]);
       setTask(taskData);
       setTree(treeData);
       try {
-        const exec = await getLatestExecution(taskId);
+        const exec = await getLatestExecution(token, taskId);
         setExecution(exec);
-        setTurns(await getTurns(taskId, exec.executionId));
+        setTurns(await getTurns(token, taskId, exec.executionId));
       } catch (err) {
         // No execution yet is expected right after creating a task — not an error to surface.
         if (!(err instanceof ApiError && err.status === 404)) throw err;
@@ -159,13 +183,14 @@ function TaskDetail({ taskId, onTaskChanged }: { taskId: string; onTaskChanged: 
     const interval = setInterval(() => void load(), 2500);
     return () => clearInterval(interval);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [taskId]);
+  }, [taskId, token]);
 
   async function handleExecute() {
+    if (!token) return;
     setExecuting(true);
     setError(null);
     try {
-      await executeTask(taskId);
+      await executeTask(token, taskId);
       onTaskChanged();
       await load();
     } catch (err) {
@@ -201,21 +226,8 @@ function TaskDetail({ taskId, onTaskChanged }: { taskId: string; onTaskChanged: 
 
       {turns.length > 0 && (
         <>
-          <h3 style={{ marginTop: 24 }}>Trace turno a turno</h3>
-          <div className="turn-list">
-            {turns.map((turn) => (
-              <div className="turn-row" key={turn.turnNumber}>
-                <div className="turn-row-header">
-                  <strong>
-                    #{turn.turnNumber} · {turn.kind}
-                  </strong>
-                  <span className="muted">{turn.completedAt ? "concluído" : "em aberto"}</span>
-                </div>
-                {turn.output && <pre>{turn.output}</pre>}
-                {turn.error && <pre className="error">{turn.error}</pre>}
-              </div>
-            ))}
-          </div>
+          <h3 style={{ marginTop: 24 }}>Pipeline de execução</h3>
+          <PipelineTimeline turns={turns} />
         </>
       )}
 
