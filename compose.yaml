@@ -32,8 +32,14 @@ services:
       GATEWAY_PROVIDER_MOCK_ENABLED: "true"
       GATEWAY_PROVIDER_ANTHROPIC_ENABLED: ${GATEWAY_PROVIDER_ANTHROPIC_ENABLED:-false}
       GATEWAY_PROVIDER_ANTHROPIC_API_KEY_FILE: /run/secrets/anthropic_api_key
+      # Fase M: master key sealing the provider keys saved from the dashboard (AES-256-GCM over a
+      # per-record HKDF data key). Mounted as a file only here — never in the database, never in
+      # hermes-go. DEV ONLY: set GATEWAY_CONNECTIONS_ALLOW_PRIVATE_URLS=true to reach a local Ollama.
+      GATEWAY_CONNECTIONS_MASTER_KEY_FILE: /run/secrets/gateway_connections_key
+      GATEWAY_CONNECTIONS_ALLOW_PRIVATE_URLS: ${GATEWAY_CONNECTIONS_ALLOW_PRIVATE_URLS:-false}
     secrets:
       - anthropic_api_key
+      - gateway_connections_key
     depends_on:
       postgres:
         condition: service_healthy
@@ -94,6 +100,19 @@ services:
       retries: 10
     restart: unless-stopped
 
+  # Local SMTP catcher for dev/testing the dashboard-auth email flow (activation link, password
+  # reset) without real SMTP credentials — captures everything sent to it, nothing leaves the
+  # host. Point HERMES_GO_SMTP_* at a real provider for production; this container is not meant
+  # to run there. Same pattern as messager-interface's mailpit service.
+  mailpit:
+    image: axllent/mailpit:latest
+    networks:
+      - hermes_internal
+      - hermes_publish
+    ports:
+      - "127.0.0.1:8026:8025"
+    restart: unless-stopped
+
   hermes-go:
     build:
       context: ./hermes-app-go
@@ -128,6 +147,38 @@ services:
       HERMES_GO_TOOL_MAX_ARGS_BYTES: ${HERMES_GO_TOOL_MAX_ARGS_BYTES:-65536}
       HERMES_GO_TOOL_MAX_RESULT_BYTES: ${HERMES_GO_TOOL_MAX_RESULT_BYTES:-65536}
       HERMES_GO_TOOL_MAX_CONCURRENT: ${HERMES_GO_TOOL_MAX_CONCURRENT:-16}
+      # Fase G1: human login (password + mandatory TOTP) for hermes-dashboard.
+      HERMES_GO_DASHBOARD_MFA_KEY: ${HERMES_GO_DASHBOARD_MFA_KEY:?set HERMES_GO_DASHBOARD_MFA_KEY in .env (openssl rand -base64 32)}
+      HERMES_GO_DASHBOARD_PUBLIC_URL: ${HERMES_GO_DASHBOARD_PUBLIC_URL:-http://127.0.0.1:5176}
+      HERMES_GO_DASHBOARD_SECURE_COOKIE: ${HERMES_GO_DASHBOARD_SECURE_COOKIE:-false}
+      # Credentialed CORS allowlist (refresh/logout send credentials: "include" for the session
+      # cookie) — must be the dashboard's exact origin(s), never "*". See platform/cors.go.
+      HERMES_GO_DASHBOARD_ALLOWED_ORIGINS: ${HERMES_GO_DASHBOARD_ALLOWED_ORIGINS:-http://127.0.0.1:5176,http://localhost:5176}
+      HERMES_GO_ADMIN_TOKEN: ${HERMES_GO_ADMIN_TOKEN:?set HERMES_GO_ADMIN_TOKEN in .env}
+      HERMES_GO_DASHBOARD_MAIL_FROM: ${HERMES_GO_DASHBOARD_MAIL_FROM:-}
+      HERMES_GO_SMTP_HOST: ${HERMES_GO_SMTP_HOST:-}
+      HERMES_GO_SMTP_PORT: ${HERMES_GO_SMTP_PORT:-587}
+      HERMES_GO_SMTP_USER: ${HERMES_GO_SMTP_USER:-}
+      HERMES_GO_SMTP_PASSWORD: ${HERMES_GO_SMTP_PASSWORD:-}
+      HERMES_GO_SMTP_AUTH: ${HERMES_GO_SMTP_AUTH:-true}
+      HERMES_GO_SMTP_STARTTLS: ${HERMES_GO_SMTP_STARTTLS:-true}
+      # Fase G2: optional — lets the Configurações page manage the bridge's owner-contacts list.
+      # HERMES_BRIDGE_ADMIN_TOKEN must equal that service's own BRIDGE_ADMIN_TOKEN.
+      HERMES_BRIDGE_ADMIN_URL: ${HERMES_BRIDGE_ADMIN_URL:-}
+      HERMES_BRIDGE_ADMIN_TOKEN: ${HERMES_BRIDGE_ADMIN_TOKEN:-}
+      # Fase S1: optional — lets the Servidores page register servers and SSH into them for
+      # health checks. Must be a DIFFERENT 32-byte Base64 key than HERMES_GO_DASHBOARD_MFA_KEY —
+      # an SSH private key and a human's TOTP secret must never share an encryption key.
+      HERMES_GO_SERVER_CREDENTIALS_KEY: ${HERMES_GO_SERVER_CREDENTIALS_KEY:-}
+      # Fase I: optional — enables per-project API keys and outbound webhooks. Its own 32-byte
+      # Base64 key (webhook signing secrets), never shared with the TOTP or SSH-credential keys.
+      HERMES_GO_INTEGRATIONS_KEY: ${HERMES_GO_INTEGRATIONS_KEY:-}
+      # Fase PA: optional — project files sealed at rest (per-file HKDF key, chunked AES-256-GCM).
+      # Its own 32-byte Base64 key; losing it makes every stored file unreadable — back it up.
+      HERMES_GO_FILES_KEY: ${HERMES_GO_FILES_KEY:-}
+      # DEV ONLY: lets webhooks target private/loopback addresses and plain http:// (turns off
+      # the SSRF guard). Must stay false anywhere real.
+      HERMES_GO_WEBHOOK_ALLOW_PRIVATE_TARGETS: ${HERMES_GO_WEBHOOK_ALLOW_PRIVATE_TARGETS:-false}
     depends_on:
       postgres:
         condition: service_healthy
@@ -135,6 +186,8 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
+    volumes:
+      - project_files:/data/project-files
     ports:
       - "127.0.0.1:8082:8080"
     networks:
@@ -164,6 +217,7 @@ networks:
 
 volumes:
   postgres_data:
+  project_files:
 
 # Sourced from an env var (ANTHROPIC_API_KEY, via .env), not a committed file — still reaches the
 # container exclusively as a mounted file at /run/secrets/anthropic_api_key, never as an env var
@@ -171,3 +225,7 @@ volumes:
 secrets:
   anthropic_api_key:
     environment: ANTHROPIC_API_KEY
+  # Fase M: 32 random bytes, Base64 (openssl rand -base64 32), from .env. Losing it makes every
+  # saved provider key unreadable (they must be re-entered) — back it up like a password.
+  gateway_connections_key:
+    environment: GATEWAY_CONNECTIONS_MASTER_KEY
