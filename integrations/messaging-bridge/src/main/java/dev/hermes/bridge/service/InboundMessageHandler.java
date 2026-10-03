@@ -1,11 +1,11 @@
 package dev.hermes.bridge.service;
 
 import dev.hermes.bridge.client.HermesAppClient;
-import dev.hermes.bridge.config.BridgeProperties;
 import dev.hermes.bridge.persistence.InboundEventStatus;
 import dev.hermes.bridge.persistence.InboundEventStore;
 import dev.hermes.bridge.persistence.OutboundReply;
 import dev.hermes.bridge.persistence.OutboundReplyStore;
+import dev.hermes.bridge.persistence.OwnerContactStore;
 import dev.hermes.bridge.web.InboundMessageEvent;
 import java.time.Duration;
 import java.nio.charset.StandardCharsets;
@@ -31,15 +31,15 @@ public class InboundMessageHandler {
 
     private final HermesAppClient hermesAppClient;
     private final AutoReplyGate autoReplyGate;
-    private final BridgeProperties properties;
+    private final OwnerContactStore ownerContacts;
     private final InboundEventStore events;
     private final OutboundReplyStore replies;
 
     public InboundMessageHandler(HermesAppClient hermesAppClient, AutoReplyGate autoReplyGate,
-                                  BridgeProperties properties, InboundEventStore events, OutboundReplyStore replies) {
+                                  OwnerContactStore ownerContacts, InboundEventStore events, OutboundReplyStore replies) {
         this.hermesAppClient = hermesAppClient;
         this.autoReplyGate = autoReplyGate;
-        this.properties = properties;
+        this.ownerContacts = ownerContacts;
         this.events = events;
         this.replies = replies;
     }
@@ -60,7 +60,7 @@ public class InboundMessageHandler {
         // Sender→authorization mapping (Fase F point 4): a contact that is not a known owner
         // number never gets the "general" agent's capabilities (delegate_to_agent, tools) —
         // it gets "customer", which the catalog defines with none.
-        String agentId = properties.ownerContacts().contains(event.from()) ? OWNER_AGENT_ID : CUSTOMER_AGENT_ID;
+        String agentId = ownerContacts.contains(event.from()) ? OWNER_AGENT_ID : CUSTOMER_AGENT_ID;
         HermesAppClient.ExecutionResult result = hermesAppClient.run(event.text(), agentId, EXECUTION_TIMEOUT);
 
         if (!"COMPLETED".equals(result.status()) || result.result() == null || result.result().isBlank()) {

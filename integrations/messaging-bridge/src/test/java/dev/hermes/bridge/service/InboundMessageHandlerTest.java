@@ -14,6 +14,7 @@ import dev.hermes.bridge.persistence.InboundEventStatus;
 import dev.hermes.bridge.persistence.InboundEventStore;
 import dev.hermes.bridge.persistence.OutboundReply;
 import dev.hermes.bridge.persistence.OutboundReplyStore;
+import dev.hermes.bridge.persistence.OwnerContactStore;
 import dev.hermes.bridge.web.InboundMessageEvent;
 import java.util.List;
 import org.junit.jupiter.api.Test;
@@ -27,14 +28,17 @@ class InboundMessageHandlerTest {
         InboundEventStore events = mock(InboundEventStore.class);
         OutboundReplyStore replies = mock(OutboundReplyStore.class);
         when(hermes.run(anyString(), anyString(), any())).thenReturn(new HermesAppClient.ExecutionResult("task-42", "COMPLETED", "reply", null));
-        BridgeProperties properties = new BridgeProperties("", "", "", "", "", true, "admin", List.of("+5511999999999"));
-        InboundMessageHandler handler = new InboundMessageHandler(hermes, new AutoReplyGate(properties), properties, events, replies);
+        BridgeProperties properties = new BridgeProperties("", "", "", "", "", true, "admin", List.of());
+        OwnerContactStore ownerContacts = mock(OwnerContactStore.class);
+        when(ownerContacts.contains("+5511999999999")).thenReturn(true);
+        InboundMessageHandler handler = new InboundMessageHandler(hermes, new AutoReplyGate(properties), ownerContacts, events, replies);
         Logger logger = (Logger) LoggerFactory.getLogger(InboundMessageHandler.class);
         ListAppender<ILoggingEvent> appender = new ListAppender<>();
         appender.start();
         logger.addAppender(appender);
         try {
-            handler.handle(new InboundMessageEvent("inbound_message", "channel-1", "conv", "msg", "external", "+5511999999999", "hello", "now"));
+            handler.handle(new InboundMessageEvent(new InboundMessageEvent.Channel("channel-1", "WHATSAPP"),
+                new InboundMessageEvent.Contact("contact-1", "+5511999999999"), new InboundMessageEvent.Message("msg", "hello", "now")));
 
             ArgumentCaptor<OutboundReply> captor = ArgumentCaptor.forClass(OutboundReply.class);
             verify(replies).insert(captor.capture());
@@ -58,10 +62,13 @@ class InboundMessageHandlerTest {
         InboundEventStore events = mock(InboundEventStore.class);
         OutboundReplyStore replies = mock(OutboundReplyStore.class);
         when(hermes.run(anyString(), anyString(), any())).thenReturn(new HermesAppClient.ExecutionResult("task-1", "COMPLETED", "reply", null));
-        BridgeProperties properties = new BridgeProperties("", "", "", "", "", true, "admin", List.of("+5511999999999"));
-        InboundMessageHandler handler = new InboundMessageHandler(hermes, new AutoReplyGate(properties), properties, events, replies);
+        BridgeProperties properties = new BridgeProperties("", "", "", "", "", true, "admin", List.of());
+        OwnerContactStore ownerContacts = mock(OwnerContactStore.class);
+        when(ownerContacts.contains("+5511999999999")).thenReturn(true);
+        InboundMessageHandler handler = new InboundMessageHandler(hermes, new AutoReplyGate(properties), ownerContacts, events, replies);
 
-        handler.handle(new InboundMessageEvent("inbound_message", "channel-1", "conv", "msg", "external", "+5511000000000", "hello", "now"));
+        handler.handle(new InboundMessageEvent(new InboundMessageEvent.Channel("channel-1", "WHATSAPP"),
+            new InboundMessageEvent.Contact("contact-1", "+5511000000000"), new InboundMessageEvent.Message("msg", "hello", "now")));
 
         verify(hermes).run(eq("hello"), eq("customer"), any());
     }

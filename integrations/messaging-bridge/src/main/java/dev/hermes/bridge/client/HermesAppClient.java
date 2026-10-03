@@ -3,34 +3,47 @@ package dev.hermes.bridge.client;
 import dev.hermes.bridge.config.BridgeProperties;
 import java.time.Duration;
 import java.time.Instant;
+import java.util.List;
 import java.util.Map;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
 import org.springframework.web.client.RestClient;
 
-// Talks to hermes-app-go's authenticated API using the integration token minted by
-// messaging-core: create a task, kick off its async execution (202 Accepted), then poll GET
-// .../executions/{id} until it reaches a terminal state.
+// Talks to hermes-app-go's authenticated API using a token this bridge mints itself (HermesAppJwt)
+// with the shared HERMES_GO_API_JWT_SECRET: create a task, kick off its async execution (202
+// Accepted), then poll GET .../executions/{id} until it reaches a terminal state. Deliberately NOT
+// the messaging-core client_credentials token (MessagingCoreClient) — that one's scopes are
+// messaging-core's own (messages:send/channels:manage/callbacks:manage) and hermes-go rejects it.
 @Component
 public class HermesAppClient {
     private static final Logger log = LoggerFactory.getLogger(HermesAppClient.class);
     private static final Duration POLL_INTERVAL = Duration.ofMillis(500);
+    private static final Duration TOKEN_TTL = Duration.ofMinutes(5);
+    private static final List<String> SCOPES = List.of("tasks:create", "tasks:execute", "tasks:read");
 
     private final RestClient client;
-    private final MessagingCoreClient messagingCore;
+    private final BridgeProperties properties;
 
-    public HermesAppClient(BridgeProperties properties, MessagingCoreClient messagingCore) {
+    public HermesAppClient(BridgeProperties properties) {
         this.client = RestClient.builder().baseUrl(properties.hermesAppUrl()).build();
-        this.messagingCore = messagingCore;
+        this.properties = properties;
+    }
+
+    private String token() {
+        return HermesAppJwt.mint(properties.hermesGoApiJwtSecret(), properties.hermesGoApiJwtIssuer(),
+            properties.hermesGoApiJwtAudience(), SCOPES, TOKEN_TTL);
     }
 
     public ExecutionResult run(String description, String agentId, Duration timeout) {
         String taskId;
         try {
+            // source=MESSAGING lets hermes-dashboard's Tasks page tell a WhatsApp exchange apart
+            // from a task someone actually designated (found 2026-10-02 — every inbound message
+            // was showing up indistinguishable from manually created work).
             Map<?, ?> created = client.post().uri("/api/v1/tasks")
-                .header("Authorization", "Bearer " + messagingCore.accessToken())
-                .body(Map.of("description", description, "agentId", agentId))
+                .header("Authorization", "Bearer " + token())
+                .body(Map.of("description", description, "agentId", agentId, "source", "MESSAGING"))
                 .retrieve().body(Map.class);
             taskId = (String) created.get("id");
         } catch (RuntimeException exception) {
@@ -41,7 +54,7 @@ public class HermesAppClient {
         String executionId;
         try {
             Map<?, ?> execution = client.post().uri("/api/v1/tasks/{taskId}/execute", taskId)
-                .header("Authorization", "Bearer " + messagingCore.accessToken())
+                .header("Authorization", "Bearer " + token())
                 .retrieve().body(Map.class);
             executionId = (String) execution.get("executionId");
         } catch (RuntimeException exception) {
@@ -57,7 +70,7 @@ public class HermesAppClient {
         while (Instant.now().isBefore(deadline)) {
             try {
                 Map<?, ?> response = client.get().uri("/api/v1/tasks/{taskId}/executions/{executionId}", taskId, executionId)
-                    .header("Authorization", "Bearer " + messagingCore.accessToken())
+                    .header("Authorization", "Bearer " + token())
                     .retrieve().body(Map.class);
                 String status = (String) response.get("status");
                 if ("COMPLETED".equals(status) || "FAILED".equals(status)) {

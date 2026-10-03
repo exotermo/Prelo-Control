@@ -2,7 +2,9 @@ package dev.hermes.bridge.client;
 
 import dev.hermes.bridge.config.BridgeProperties;
 import java.time.Instant;
+import java.util.Arrays;
 import java.util.Base64;
+import java.util.List;
 import java.util.Map;
 import java.util.concurrent.locks.ReentrantLock;
 import java.nio.charset.StandardCharsets;
@@ -49,6 +51,20 @@ public class MessagingCoreClient {
     /** Returns the cached integration token for other first-party services in the same trust
      * boundary. The token is never logged or returned to an HTTP caller. */
     public String accessToken() { return token(); }
+
+    // Fase H4: hermes-dashboard's Integrações page needs to show WhatsApp connection status
+    // without anyone opening a shell/psql — see AdminController.channelStatus(). Reuses the same
+    // client_credentials token already minted for sendMessage; no new auth surface.
+    public List<ChannelSummary> listChannels() {
+        String token = accessToken();
+        ChannelSummary[] response = client.get().uri("/api/v1/channels")
+            .header(HttpHeaders.AUTHORIZATION, "Bearer " + token)
+            .retrieve()
+            .body(ChannelSummary[].class);
+        return response == null ? List.of() : Arrays.asList(response);
+    }
+
+    public record ChannelSummary(String id, String channelType, String status, String externalRef, String createdAt) { }
 
     private String token() {
         if (cachedToken != null && Instant.now().isBefore(cachedTokenExpiresAt)) {

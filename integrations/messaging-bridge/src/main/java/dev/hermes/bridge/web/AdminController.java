@@ -1,23 +1,57 @@
 package dev.hermes.bridge.web;
 
+import dev.hermes.bridge.client.MessagingCoreClient;
 import dev.hermes.bridge.config.BridgeProperties;
+import dev.hermes.bridge.persistence.OwnerContactStore;
 import dev.hermes.bridge.service.AutoReplyGate;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
+import java.util.List;
+import java.util.regex.Pattern;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.PutMapping;
+import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.server.ResponseStatusException;
 
 @RestController
 public class AdminController {
+    // E.164: a leading "+", then 1-15 digits, first digit non-zero.
+    private static final Pattern E164 = Pattern.compile("^\\+[1-9]\\d{1,14}$");
+
     private final BridgeProperties properties;
     private final AutoReplyGate gate;
+    private final OwnerContactStore ownerContacts;
+    private final MessagingCoreClient messagingCore;
 
-    public AdminController(BridgeProperties properties, AutoReplyGate gate) {
+    public AdminController(BridgeProperties properties, AutoReplyGate gate, OwnerContactStore ownerContacts, MessagingCoreClient messagingCore) {
         this.properties = properties;
         this.gate = gate;
+        this.ownerContacts = ownerContacts;
+        this.messagingCore = messagingCore;
+    }
+
+    // Fase H4: hermes-dashboard's Integrações page. Only WhatsApp channels are relevant today
+    // (the only channel type this deployment ever registers) — filtering here keeps the response
+    // small and future channel types (Telegram, Email, ...) from leaking into a page that isn't
+    // built to show them yet.
+    @GetMapping("/admin/channel-status")
+    public ResponseEntity<List<MessagingCoreClient.ChannelSummary>> channelStatus(@RequestHeader(value = "X-Admin-Token", required = false) String token) {
+        requireAdminToken(token);
+        List<MessagingCoreClient.ChannelSummary> whatsapp = messagingCore.listChannels().stream()
+            .filter(channel -> "WHATSAPP".equals(channel.channelType()))
+            .toList();
+        return ResponseEntity.ok(whatsapp);
+    }
+
+    @GetMapping("/admin/auto-reply")
+    public ResponseEntity<AutoReplyStatus> autoReplyStatus(@RequestHeader(value = "X-Admin-Token", required = false) String token) {
+        requireAdminToken(token);
+        return ResponseEntity.ok(status());
     }
 
     @PostMapping("/admin/pause")
@@ -33,6 +67,32 @@ public class AdminController {
         gate.resume();
         return ResponseEntity.ok(status());
     }
+
+    // Fase G2: managed by hermes-dashboard's Configurações page (via hermes-go's authenticated
+    // /api/v1/settings/owner-contacts, which proxies here with the same X-Admin-Token used for
+    // pause/resume above) — no new authentication surface on the bridge itself.
+    @GetMapping("/admin/owner-contacts")
+    public ResponseEntity<OwnerContactsResponse> listOwnerContacts(@RequestHeader(value = "X-Admin-Token", required = false) String token) {
+        requireAdminToken(token);
+        return ResponseEntity.ok(new OwnerContactsResponse(ownerContacts.list()));
+    }
+
+    @PutMapping("/admin/owner-contacts")
+    public ResponseEntity<OwnerContactsResponse> replaceOwnerContacts(@RequestHeader(value = "X-Admin-Token", required = false) String token,
+                                                                       @RequestBody OwnerContactsRequest request) {
+        requireAdminToken(token);
+        List<String> contacts = request.contacts() == null ? List.of() : request.contacts();
+        for (String phone : contacts) {
+            if (phone == null || !E164.matcher(phone).matches()) {
+                throw new ResponseStatusException(HttpStatus.UNPROCESSABLE_ENTITY, "each contact must be E.164 (e.g. +5511999999999): " + phone);
+            }
+        }
+        ownerContacts.replaceAll(contacts, "dashboard");
+        return ResponseEntity.ok(new OwnerContactsResponse(ownerContacts.list()));
+    }
+
+    public record OwnerContactsRequest(List<String> contacts) { }
+    public record OwnerContactsResponse(List<String> contacts) { }
 
     private void requireAdminToken(String provided) {
         String expected = properties.adminToken();

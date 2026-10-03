@@ -28,3 +28,8 @@ bridge:
   # Legacy body-only signatures are disabled by default. Enable temporarily only while all
   # callback subscriptions are migrated to contractVersion=2.
   allow-legacy-callback-signatures: ${BRIDGE_ALLOW_LEGACY_CALLBACK_SIGNATURES:false}
+  # HermesAppClient mints its own hermes-go token locally with these — must be the exact same
+  # values as hermes-go's HERMES_GO_API_JWT_SECRET/_ISSUER/_AUDIENCE.
+  hermes-go-api-jwt-secret: ${HERMES_GO_API_JWT_SECRET:}
+  hermes-go-api-jwt-issuer: ${HERMES_GO_API_JWT_ISSUER:messaging-core}
+  hermes-go-api-jwt-audience: ${HERMES_GO_API_JWT_AUDIENCE:messaging-core}
