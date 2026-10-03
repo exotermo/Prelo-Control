@@ -43,6 +43,24 @@ func (r *ExecutionSuspensionRepository) FindActiveByResumeKey(ctx context.Contex
 	return suspension, true, nil
 }
 
+// FindActiveByExecutionID is the Pipeline page's (Fase P) direct lookup — given an execution,
+// is it suspended right now, and why? The complement of FindActiveByResumeKey, which goes the
+// other direction (used when something arrives to resolve a suspension).
+func (r *ExecutionSuspensionRepository) FindActiveByExecutionID(ctx context.Context, executionID domain.ExecutionID) (domain.ExecutionSuspension, bool, error) {
+	row := r.pool.QueryRow(ctx, `
+		SELECT id, execution_id, reason, resume_key, created_at, resolved_at
+		  FROM execution_suspensions WHERE execution_id = $1 AND resolved_at IS NULL`,
+		executionID.Value)
+	suspension, err := scanSuspension(row)
+	if err != nil {
+		if errors.Is(err, application.ErrExecutionSuspensionNotFound) {
+			return domain.ExecutionSuspension{}, false, nil
+		}
+		return domain.ExecutionSuspension{}, false, err
+	}
+	return suspension, true, nil
+}
+
 func (r *ExecutionSuspensionRepository) Resolve(ctx context.Context, id domain.ExecutionSuspensionID) error {
 	tag, err := r.pool.Exec(ctx, `UPDATE execution_suspensions SET resolved_at = now() WHERE id = $1 AND resolved_at IS NULL`, id.Value)
 	if err != nil {
