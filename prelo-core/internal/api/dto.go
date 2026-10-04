@@ -8,6 +8,9 @@ type createTaskRequest struct {
 	// creates for an inbound WhatsApp message — see domain.TaskSource. Omitted/empty defaults to
 	// "MANUAL", so the dashboard's existing "Nova task" form needs no change.
 	Source *string `json:"source"`
+	// ContactAddress (Fase C2) is the WhatsApp sender of a MESSAGING task — a phone or a
+	// WhatsApp ID. Only accepted together with source MESSAGING.
+	ContactAddress *string `json:"contactAddress"`
 }
 
 type manualContextItemRequest struct {
@@ -23,6 +26,9 @@ type taskResponse struct {
 	CreatedAt   string  `json:"createdAt"`
 	Source      string  `json:"source"`
 	ProjectID   *string `json:"projectId"`
+	// Fase C2.
+	ClientID       *string `json:"clientId"`
+	ContactAddress *string `json:"contactAddress"`
 }
 
 type executionResponse struct {

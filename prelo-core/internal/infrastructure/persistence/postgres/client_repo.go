@@ -151,7 +151,30 @@ func (r *ClientRepository) AddContact(ctx context.Context, c domain.ClientContac
 	if _, err := tx.Exec(ctx, `UPDATE clients SET updated_at = now() WHERE id = $1`, c.ClientID.Value); err != nil {
 		return err
 	}
+	// Fase C2: conversations that already came from this number/WhatsApp ID join the client.
+	if c.Kind == domain.ContactKindPhone || c.Kind == domain.ContactKindWhatsApp {
+		if _, err := tx.Exec(ctx, `UPDATE tasks SET client_id = $1 WHERE client_id IS NULL AND contact_address = ANY($2)`,
+			c.ClientID.Value, domain.ContactMatchKeys(c.Value)); err != nil {
+			return err
+		}
+	}
 	return tx.Commit(ctx)
+}
+
+func (r *ClientRepository) FindByContactKeys(ctx context.Context, keys []string) (*domain.ClientID, error) {
+	var id uuid.UUID
+	err := r.pool.QueryRow(ctx, `
+		SELECT c.id FROM client_contacts cc JOIN clients c ON c.id = cc.client_id
+		 WHERE cc.kind IN ('PHONE', 'WHATSAPP') AND cc.value = ANY($1) AND c.deleted_at IS NULL
+		 ORDER BY (cc.kind = 'WHATSAPP') DESC, cc.created_at
+		 LIMIT 1`, keys).Scan(&id)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return &domain.ClientID{Value: id}, nil
 }
 
 func (r *ClientRepository) RemoveContact(ctx context.Context, clientID domain.ClientID, contactID uuid.UUID) error {

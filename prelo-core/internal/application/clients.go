@@ -22,7 +22,7 @@ const (
 
 // Viewer is who is asking: the dashboard user and whether they administer every project.
 type Viewer struct {
-	UserID     domain.DashboardUserID
+	UserID      domain.DashboardUserID
 	AllProjects bool
 }
 

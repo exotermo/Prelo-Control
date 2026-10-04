@@ -2,6 +2,7 @@ package application
 
 import (
 	"context"
+	"strings"
 
 	"github.com/exotermo/prelo-core/internal/domain"
 )
@@ -14,7 +15,17 @@ type CreateTaskUseCase struct {
 	manualContext ManualContextRepository
 	agents        AgentRegistry
 	projects      ProjectReader
+	contacts      ContactResolver
 }
+
+// ContactResolver recognizes a WhatsApp sender as a client (Fase C2).
+type ContactResolver interface {
+	FindByContactKeys(ctx context.Context, keys []string) (*domain.ClientID, error)
+	ListProjects(ctx context.Context, clientID domain.ClientID) ([]domain.Project, error)
+}
+
+// SetContactResolver enables Fase C2: messages from a known contact are tied to their client.
+func (uc *CreateTaskUseCase) SetContactResolver(contacts ContactResolver) { uc.contacts = contacts }
 
 // ProjectReader is what Fase PA needs from projects: their settings (default agent, instructions).
 type ProjectReader interface {
@@ -34,7 +45,7 @@ func NewCreateTaskUseCase(tasks TaskRepository, manualContext ManualContextRepos
 // catalog, never from the request. projectID (Fase W) is resolved by the handler from the
 // X-Project-Id header, never from request JSON — nil means the "unassigned" bucket.
 func (uc *CreateTaskUseCase) Create(ctx context.Context, description string, items []domain.ManualContextItem, agentID *domain.AgentID, source domain.TaskSource, projectID *domain.ProjectID) (domain.Task, error) {
-	return uc.create(ctx, description, items, agentID, "", source, projectID)
+	return uc.create(ctx, description, items, agentID, "", source, projectID, nil)
 }
 
 // CreateForTenant is used by the authenticated HTTP API. Tenant ownership is assigned from
@@ -45,10 +56,71 @@ func (uc *CreateTaskUseCase) CreateForTenant(ctx context.Context, tenantID strin
 	if tenantID == "" {
 		return domain.Task{}, &domain.ValidationError{Message: "tenant identity is required"}
 	}
-	return uc.create(ctx, description, items, agentID, tenantID, source, projectID)
+	return uc.create(ctx, description, items, agentID, tenantID, source, projectID, nil)
 }
 
-func (uc *CreateTaskUseCase) create(ctx context.Context, description string, items []domain.ManualContextItem, agentID *domain.AgentID, tenantID string, source domain.TaskSource, projectID *domain.ProjectID) (domain.Task, error) {
+// CreateForTenantFromContact is CreateForTenant for an inbound message (Fase C2): the sender's
+// address is stored on the task and, when it belongs to a client, the task is tied to that
+// client — and placed in the client's project when the client has exactly one (with several,
+// a human picks; it stays unassigned).
+func (uc *CreateTaskUseCase) CreateForTenantFromContact(ctx context.Context, tenantID string, description string, items []domain.ManualContextItem, agentID *domain.AgentID, projectID *domain.ProjectID, contactAddress string) (domain.Task, error) {
+	if tenantID == "" {
+		return domain.Task{}, &domain.ValidationError{Message: "tenant identity is required"}
+	}
+	return uc.create(ctx, description, items, agentID, tenantID, domain.TaskSourceMessaging, projectID, &contactAddress)
+}
+
+type contactMatch struct {
+	address   *string
+	clientID  *domain.ClientID
+	projectID *domain.ProjectID
+}
+
+func (uc *CreateTaskUseCase) matchContact(ctx context.Context, raw string, projectID *domain.ProjectID) (contactMatch, error) {
+	canonical, err := domain.CanonicalWhatsAppAddress(raw)
+	if err != nil {
+		// Unrecognized format: keep what was sent (bounded) so a human can still see who it was.
+		trimmed := strings.TrimSpace(raw)
+		if len(trimmed) > 80 {
+			trimmed = trimmed[:80]
+		}
+		if trimmed == "" {
+			return contactMatch{}, nil
+		}
+		return contactMatch{address: &trimmed}, nil
+	}
+	match := contactMatch{address: &canonical}
+	if uc.contacts == nil {
+		return match, nil
+	}
+	clientID, err := uc.contacts.FindByContactKeys(ctx, domain.ContactMatchKeys(canonical))
+	if err != nil || clientID == nil {
+		return match, err
+	}
+	match.clientID = clientID
+	if projectID == nil {
+		projects, err := uc.contacts.ListProjects(ctx, *clientID)
+		if err != nil {
+			return match, err
+		}
+		if len(projects) == 1 {
+			match.projectID = &projects[0].ID
+		}
+	}
+	return match, nil
+}
+
+func (uc *CreateTaskUseCase) create(ctx context.Context, description string, items []domain.ManualContextItem, agentID *domain.AgentID, tenantID string, source domain.TaskSource, projectID *domain.ProjectID, contactAddress *string) (domain.Task, error) {
+	var match contactMatch
+	if contactAddress != nil {
+		var err error
+		if match, err = uc.matchContact(ctx, *contactAddress, projectID); err != nil {
+			return domain.Task{}, err
+		}
+		if match.projectID != nil {
+			projectID = match.projectID
+		}
+	}
 	resolvedAgentID := defaultAgentID
 	if agentID != nil {
 		resolvedAgentID = *agentID
@@ -70,6 +142,8 @@ func (uc *CreateTaskUseCase) create(ctx context.Context, description string, ite
 	}
 	task.TenantID = tenantID
 	task.ProjectID = projectID
+	task.ClientID = match.clientID
+	task.ContactAddress = match.address
 	if err := uc.tasks.Insert(ctx, task); err != nil {
 		return domain.Task{}, err
 	}

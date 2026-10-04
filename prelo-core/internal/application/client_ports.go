@@ -45,6 +45,8 @@ type ClientRepository interface {
 	// SetProjectClient links (or with nil unlinks) a project to a client.
 	SetProjectClient(ctx context.Context, projectID domain.ProjectID, clientID *domain.ClientID) error
 	ListProjects(ctx context.Context, clientID domain.ClientID) ([]domain.Project, error)
+	// FindByContactKeys returns the client owning any of these phone/WhatsApp values (Fase C2).
+	FindByContactKeys(ctx context.Context, keys []string) (*domain.ClientID, error)
 	// ClientOfProject returns the client a project belongs to, if any (tasks inherit it).
 	ClientOfProject(ctx context.Context, projectID domain.ProjectID) (*domain.ClientID, error)
 }

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -92,7 +93,22 @@ func (h *TaskHandler) Create(w http.ResponseWriter, r *http.Request) {
 
 	var task domain.Task
 	var err error
-	if identity, ok := tenantIdentity(r.Context()); ok {
+	contact := ""
+	if req.ContactAddress != nil {
+		contact = strings.TrimSpace(*req.ContactAddress)
+	}
+	if contact != "" && source != domain.TaskSourceMessaging {
+		writeError(w, &domain.ValidationError{Message: "contactAddress is only accepted with source MESSAGING"})
+		return
+	}
+	identity, isTenant := tenantIdentity(r.Context())
+	if contact != "" && !isTenant {
+		writeError(w, &domain.ValidationError{Message: "contactAddress is only accepted from the messaging integration"})
+		return
+	}
+	if contact != "" {
+		task, err = h.create.CreateForTenantFromContact(r.Context(), identity.TenantID, req.Description, items, agentID, projectID, contact)
+	} else if isTenant {
 		task, err = h.create.CreateForTenant(r.Context(), identity.TenantID, req.Description, items, agentID, source, projectID)
 	} else {
 		task, err = h.create.Create(r.Context(), req.Description, items, agentID, source, projectID)
@@ -312,5 +328,7 @@ func taskResponseFrom(t domain.Task) taskResponse {
 		id := t.ProjectID.String()
 		resp.ProjectID = &id
 	}
+	resp.ClientID = clientIDString(t.ClientID)
+	resp.ContactAddress = t.ContactAddress
 	return resp
 }

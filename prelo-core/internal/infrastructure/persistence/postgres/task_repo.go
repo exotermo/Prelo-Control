@@ -30,15 +30,17 @@ func (r *TaskRepository) Insert(ctx context.Context, task domain.Task) error {
 		tenantID = task.TenantID
 	}
 	_, err := r.pool.Exec(ctx, `
-		INSERT INTO tasks (id, tenant_id, project_id, description, status, created_at, agent_id, task_version, parent_task_id, depth, source, client_id)
+		INSERT INTO tasks (id, tenant_id, project_id, description, status, created_at, agent_id, task_version, parent_task_id, depth, source, client_id, contact_address)
 		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11,
-		        -- Fase C1: a task inherits the client of its project (delegated subtasks too).
-		        (SELECT p.client_id FROM projects p WHERE p.id = $3))`,
-		task.ID.Value, tenantID, projectIDValue(task.ProjectID), task.Description, string(task.Status), task.CreatedAt, task.AgentID.Value, task.Version, parentTaskID, task.Depth, string(task.Source))
+		        -- Fase C1/C2: an explicit client (recognized WhatsApp sender) wins; otherwise the
+		        -- task inherits the client of its project (delegated subtasks too).
+		        COALESCE($12::uuid, (SELECT p.client_id FROM projects p WHERE p.id = $3)), $13)`,
+		task.ID.Value, tenantID, projectIDValue(task.ProjectID), task.Description, string(task.Status), task.CreatedAt, task.AgentID.Value, task.Version, parentTaskID, task.Depth, string(task.Source),
+		clientIDValue(task.ClientID), task.ContactAddress)
 	return err
 }
 
-const taskSelectColumns = "id, tenant_id, project_id, description, status, created_at, agent_id, task_version, parent_task_id, depth, source"
+const taskSelectColumns = "id, tenant_id, project_id, description, status, created_at, agent_id, task_version, parent_task_id, depth, source, client_id, contact_address"
 
 func (r *TaskRepository) FindByID(ctx context.Context, id domain.TaskID) (domain.Task, error) {
 	row := r.pool.QueryRow(ctx, `
@@ -207,7 +209,8 @@ func scanTask(row pgx.Row) (domain.Task, error) {
 	var tenantID *uuid.UUID
 	var projectID *uuid.UUID
 	var parentTaskID *uuid.UUID
-	if err := row.Scan(&t.ID.Value, &tenantID, &projectID, &t.Description, &status, &t.CreatedAt, &agentID, &t.Version, &parentTaskID, &t.Depth, &source); err != nil {
+	var clientID *uuid.UUID
+	if err := row.Scan(&t.ID.Value, &tenantID, &projectID, &t.Description, &status, &t.CreatedAt, &agentID, &t.Version, &parentTaskID, &t.Depth, &source, &clientID, &t.ContactAddress); err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return domain.Task{}, application.ErrTaskNotFound
 		}
@@ -227,7 +230,17 @@ func scanTask(row pgx.Row) (domain.Task, error) {
 		t.ParentTaskID = &id
 	}
 	t.Source = domain.TaskSource(source)
+	if clientID != nil {
+		t.ClientID = &domain.ClientID{Value: *clientID}
+	}
 	return t, nil
+}
+
+func clientIDValue(id *domain.ClientID) *uuid.UUID {
+	if id == nil {
+		return nil
+	}
+	return &id.Value
 }
 
 // Update performs a version-checked write (`WHERE id=$1 AND task_version=$2`). The caller is

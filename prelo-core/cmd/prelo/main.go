@@ -213,6 +213,7 @@ func main() {
 
 		// Fase C1: clients (CRM), search, home (recent + pending) and client timeline.
 		clientRepo := postgres.NewClientRepository(pool)
+		createTask.SetContactResolver(clientRepo) // Fase C2: WhatsApp sender → client
 		workspace := application.NewWorkspaceService(clientRepo, projectMemberRepo, postgres.NewWorkspaceReadModel(pool))
 		api.RegisterWorkspaceRoutes(mux, api.NewWorkspaceHandler(workspace, clientRepo))
 
