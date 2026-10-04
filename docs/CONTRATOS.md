@@ -42,6 +42,12 @@ chave de API só o próprio projeto (403 em outro).
 
 ## 2. Recursos
 
+### Me e workspace (PR-1)
+`GET /api/v1/me` — só sessão de pessoa (web; mobile no PR-2); chave de integração e token técnico → 403.
+`{userId, email, role, scopes[], workspaceId, workspaceName, projects:[{id,name,clientId}], session:{kind,deviceId,deviceName}}`.
+`workspaceId` é estável (linha única criada pela migration 00024) e identifica a instância em todo registro
+de ação externa.
+
 ### Project
 `GET/POST /api/v1/projects`, `PATCH|DELETE /api/v1/projects/{id}`, `PUT /api/v1/projects/{id}/client`.
 Campos: `id, name, description, createdAt, memberCount, defaultAgentId, instructions, coverColor, clientId`.
@@ -111,9 +117,9 @@ conexão por API da instância (ou o modelo simulado).
 
 | # | Lacuna | Contrato | PR do Prelo |
 |---|---|---|---|
-| G1 | Workspace | `workspaceId` da instância — `integracoes/sessao-mobile.md` | PR-1 |
+| G1 | Workspace | **implementado** (PR-1) — `workspaceId` em `/me` | PR-1 ✔ |
 | G2 | Sessão do app (refresh no corpo, por dispositivo, rotação, revogação) | `integracoes/sessao-mobile.md` | PR-2 |
-| G3 | `GET /api/v1/me` | `integracoes/sessao-mobile.md` | PR-1 |
+| G3 | `GET /api/v1/me` | **implementado** (PR-1) — seção 2 | PR-1 ✔ |
 | G4 | Tempo real | v1 polling; v2 SSE `GET /api/v1/events/stream` (a especificar) | PR-4 |
 | G5 | Pedido de ação externa | `integracoes/action-requests.md` | PR-3 |
 | G6 | Decisão de volta (`action.decided` + `GET`) | `integracoes/action-requests.md` | PR-3 |

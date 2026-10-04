@@ -1,6 +1,7 @@
 # Contrato v1 — Sessão do app (Work Control) e identidade
 
-> **Status: CONGELADO (Fase 0), ainda não implementado no Prelo** (PR-1 e PR-2). Lacunas G1, G2, G3 e G9
+> **Status:** G1 e G3 (`/me`, workspace) **implementados** no PR-1 (2026-10-04). G2 e G9 (sessão mobile,
+> confirmação com TOTP) **congelados, ainda não implementados** (PR-2). Lacunas G1, G2, G3 e G9
 > de `docs/CONTRATOS.md`. Identidade única = a do Prelo (e-mail + senha + TOTP). Nada de Keycloak.
 
 ## Princípios
@@ -23,8 +24,8 @@ Qualquer sessão (web ou mobile).
 
 ## G1 — Workspace
 
-v1: a instância do Prelo é o workspace. `workspaceId` é um identificador estável configurado na instalação
-(`PRELO_WORKSPACE_ID`, UUID) e aparece em `/me` e em todo `action-request`. Multi-workspace é evolução
+v1: a instância do Prelo é o workspace. `workspaceId` é um UUID estável gerado uma vez pela migration 00024
+(tabela `workspace`, linha única) e aparece em `/me` e em todo `action-request`. Multi-workspace é evolução
 compatível (campo já existe).
 
 ## G2 — Fluxo mobile
