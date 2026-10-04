@@ -51,11 +51,24 @@ func NewDashboardSessionIssuer(cfg config.APIAuthConfig) *DashboardSessionIssuer
 	return &DashboardSessionIssuer{secret: []byte(cfg.Secret), issuer: cfg.Issuer, audience: cfg.Audience}
 }
 
+// IssueSessionAccessToken (PR-2) is the app variant: same claims plus "sid", the mobile session
+// id, which JWTAuthMiddleware checks for revocation on every request.
+func (i *DashboardSessionIssuer) IssueSessionAccessToken(userID string, role domain.DashboardRole, sessionID string) (string, int, error) {
+	return i.issue(userID, role, sessionID)
+}
+
 func (i *DashboardSessionIssuer) IssueAccessToken(userID string, role domain.DashboardRole) (string, int, error) {
+	return i.issue(userID, role, "")
+}
+
+func (i *DashboardSessionIssuer) issue(userID string, role domain.DashboardRole, sessionID string) (string, int, error) {
 	now := time.Now().UTC()
 	claims := jwt.MapClaims{
 		"sub": userID, "token_use": "dashboard", "scope": scopesFor(role),
 		"iss": i.issuer, "aud": i.audience, "iat": now.Unix(), "exp": now.Add(dashboardAccessTTL).Unix(),
+	}
+	if sessionID != "" {
+		claims["sid"] = sessionID
 	}
 	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
 	signed, err := token.SignedString(i.secret)

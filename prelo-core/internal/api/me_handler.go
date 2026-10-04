@@ -18,7 +18,15 @@ type MeHandler struct {
 	projects   meProjects
 	members    meMembers
 	workspaces meWorkspaces
+	sessions   meSessions
 }
+
+type meSessions interface {
+	FindByID(ctx context.Context, id uuid.UUID) (domain.MobileSession, error)
+}
+
+// SetMobileSessions (PR-2): /me reports the app session (device) behind the token.
+func (h *MeHandler) SetMobileSessions(sessions meSessions) { h.sessions = sessions }
 
 type meUsers interface {
 	FindByID(ctx context.Context, id domain.DashboardUserID) (domain.DashboardUser, error)
@@ -109,6 +117,14 @@ func (h *MeHandler) Get(w http.ResponseWriter, r *http.Request) {
 		WorkspaceID: workspace.ID.String(), WorkspaceName: workspace.Name,
 		Projects: make([]meProject, 0, len(projects)),
 		Session:  meSession{Kind: "web"},
+	}
+	if identity.SessionID != "" && h.sessions != nil {
+		if sid, err := uuid.Parse(identity.SessionID); err == nil {
+			if s, err := h.sessions.FindByID(r.Context(), sid); err == nil {
+				device, name := s.DeviceID.String(), s.DeviceName
+				out.Session = meSession{Kind: "mobile", DeviceID: &device, DeviceName: &name}
+			}
+		}
 	}
 	for _, p := range projects {
 		out.Projects = append(out.Projects, meProject{ID: p.ID.String(), Name: p.Name, ClientID: clientIDString(p.ClientID)})

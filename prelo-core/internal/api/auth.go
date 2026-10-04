@@ -31,6 +31,9 @@ type AuthContext struct {
 	// "unassigned" bucket. Unlike TenantID, this is never a JWT claim: the same dashboard
 	// session moves between several projects across requests.
 	ProjectID *uuid.UUID
+	// SessionID (PR-2) is the app session behind a mobile access token ("sid" claim); empty for
+	// web sessions. Checked against revocation on every request.
+	SessionID string
 }
 
 func (a AuthContext) HasScope(scope string) bool {
@@ -66,7 +69,17 @@ type JWTAuthMiddleware struct {
 	projects  projectFinder
 	members   projectMembershipChecker
 	apiKeys   ApiKeyAuthenticator
+	sessions  mobileSessionChecker
 }
+
+// mobileSessionChecker (PR-2): is this app session still valid right now?
+type mobileSessionChecker interface {
+	FindByID(ctx context.Context, id uuid.UUID) (domain.MobileSession, error)
+}
+
+// SetMobileSessions makes app access tokens die with their session (logout, revocation, reuse),
+// instead of living out their 15 minutes.
+func (m *JWTAuthMiddleware) SetMobileSessions(sessions mobileSessionChecker) { m.sessions = sessions }
 
 func NewJWTAuthMiddleware(cfg config.APIAuthConfig, projects projectFinder, members projectMembershipChecker, apiKeys ApiKeyAuthenticator) (*JWTAuthMiddleware, error) {
 	if strings.TrimSpace(cfg.Secret) == "" {
@@ -168,6 +181,12 @@ func (m *JWTAuthMiddleware) Handler(next http.Handler) http.Handler {
 		if err != nil {
 			writeAuthError(w, http.StatusUnauthorized, "invalid bearer token")
 			return
+		}
+		if identity.SessionID != "" {
+			if !m.sessionActive(r.Context(), identity) {
+				writeAuthError(w, http.StatusUnauthorized, "session revoked or expired")
+				return
+			}
 		}
 		required := requiredScope(r.Method, r.URL.Path)
 		if required != "" && !identity.HasScope(required) {
@@ -286,7 +305,8 @@ func identityFromClaims(claims jwt.MapClaims, requestID string) (AuthContext, er
 	// A dashboard session is a human operator of this single Prelo instance, not scoped to any
 	// tenant — every other token_use is machine-to-machine and always carries a tenant_id.
 	if tokenUse == "dashboard" {
-		return AuthContext{Subject: sub, TokenUse: tokenUse, Scopes: scopes, RequestID: requestID}, nil
+		sid, _ := claims["sid"].(string)
+		return AuthContext{Subject: sub, TokenUse: tokenUse, Scopes: scopes, RequestID: requestID, SessionID: sid}, nil
 	}
 	tenant, ok := claims["tenant_id"].(string)
 	if !ok || strings.TrimSpace(tenant) == "" {
@@ -344,10 +364,21 @@ func RequestID(ctx context.Context) string {
 }
 
 func requiredScope(method, path string) string {
+	// PR-3: the executor side of external action requests (project integration keys only).
+	if strings.HasPrefix(path, "/api/v1/action-requests") {
+		if method == http.MethodPost && strings.HasSuffix(path, "/result") {
+			return "actions:report"
+		}
+		return "actions:request"
+	}
 	// PR-1 (contratos G3): any person's session — both roles carry projects:read; integration
 	// keys and technical tokens don't, so they get 403 before reaching the handler.
-	if path == "/api/v1/me" {
+	if path == "/api/v1/me" || strings.HasPrefix(path, "/api/v1/me/") {
 		return "projects:read"
+	}
+	// PR-2: an admin ends another user's app sessions.
+	if strings.HasPrefix(path, "/api/v1/users/") && strings.Contains(path, "/sessions") {
+		return "users:manage"
 	}
 	// Fase T: the owner's WhatsApp answer, relayed only by prelo-messaging-bridge.
 	if strings.HasPrefix(path, "/api/v1/approvals/by-code/") {
@@ -456,4 +487,19 @@ func requiredScope(method, path string) string {
 func writeAuthError(w http.ResponseWriter, status int, message string) {
 	w.Header().Set("WWW-Authenticate", `Bearer realm="prelo-api"`)
 	writeJSON(w, status, errorResponse{Code: map[int]string{401: "unauthorized", 403: "forbidden"}[status], Message: message})
+}
+
+func (m *JWTAuthMiddleware) sessionActive(ctx context.Context, identity AuthContext) bool {
+	if m.sessions == nil {
+		return false // a session-bound token with no way to check it is refused, never trusted
+	}
+	id, err := uuid.Parse(identity.SessionID)
+	if err != nil {
+		return false
+	}
+	session, err := m.sessions.FindByID(ctx, id)
+	if err != nil {
+		return false
+	}
+	return session.UserID.Value.String() == identity.Subject && session.Active(time.Now().UTC())
 }

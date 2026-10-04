@@ -61,6 +61,31 @@ func mapError(err error) (int, string, string) {
 	if errors.Is(err, application.ErrProjectFileNotFound) {
 		return http.StatusNotFound, "file_not_found", "file not found"
 	}
+	// PR-3: external action requests.
+	if errors.Is(err, domain.ErrPayloadHashMismatch) {
+		return http.StatusUnprocessableEntity, "payload_hash_mismatch", "payloadHash does not match the canonical payload"
+	}
+	if errors.Is(err, application.ErrIdempotencyConflict) {
+		return http.StatusConflict, "idempotency_conflict", "this idempotencyKey was already used with a different payload"
+	}
+	if errors.Is(err, application.ErrActionNotApproved) {
+		return http.StatusConflict, "not_approved", "the action request is not approved — do not execute"
+	}
+	if errors.Is(err, application.ErrActionWindowClosed) {
+		return http.StatusConflict, "approval_window_closed", "the approval is too old to start executing; request again"
+	}
+	if errors.Is(err, application.ErrActionRequestNotFound) {
+		return http.StatusNotFound, "action_request_not_found", "action request not found"
+	}
+	if errors.Is(err, application.ErrNotProjectMember) {
+		return http.StatusForbidden, "forbidden", "not allowed for this project"
+	}
+	if errors.Is(err, application.ErrStepUpRequired) {
+		return http.StatusForbidden, "step_up_required", "approving a high-risk action from the app needs a fresh two-factor code (totpCode)"
+	}
+	if errors.Is(err, application.ErrMobileSessionNotFound) {
+		return http.StatusNotFound, "session_not_found", "session not found"
+	}
 	if errors.Is(err, application.ErrClientNotFound) {
 		return http.StatusNotFound, "client_not_found", "client not found"
 	}

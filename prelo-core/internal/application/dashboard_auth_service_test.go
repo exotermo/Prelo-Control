@@ -175,6 +175,10 @@ func (fakeSessionIssuer) IssueAccessToken(userID string, role domain.DashboardRo
 	return "access-for-" + userID + "-" + string(role), 900, nil
 }
 
+func (fakeSessionIssuer) IssueSessionAccessToken(userID string, role domain.DashboardRole, sessionID string) (string, int, error) {
+	return "access-for-" + userID + "-" + string(role) + "-sid-" + sessionID, 900, nil
+}
+
 func setupDashboardAuth(totpCode string) (*DashboardAuthService, *fakeDashboardUsers, *fakeDashboardMailer) {
 	users := newFakeDashboardUsers()
 	tokens := newFakeDashboardTokens()

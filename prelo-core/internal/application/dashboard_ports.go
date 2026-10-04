@@ -5,6 +5,8 @@ import (
 	"errors"
 	"time"
 
+	"github.com/google/uuid"
+
 	"github.com/exotermo/prelo-core/internal/domain"
 )
 
@@ -18,6 +20,12 @@ var ErrDashboardInvalidCredentials = errors.New("invalid email or password")
 var ErrDashboardInvalidCode = errors.New("invalid or expired code")
 var ErrDashboardTotpAlreadyEnabled = errors.New("two-factor authentication is already enabled")
 var ErrDashboardCannotChangeOwnRole = errors.New("you cannot change your own role")
+
+// PR-2 (contratos G2/G9): app sessions.
+var ErrMobileSessionNotFound = errors.New("mobile session not found")
+var ErrMobileRefreshInvalid = errors.New("invalid refresh token")
+var ErrMobileRefreshReused = errors.New("refresh token reused; session revoked")
+var ErrStepUpRequired = errors.New("a recent two-factor code is required for this approval")
 
 type DashboardUserRepository interface {
 	Insert(ctx context.Context, user domain.DashboardUser) error
@@ -85,4 +93,22 @@ type DashboardPasswordHasher interface {
 // no new shared secret needed).
 type DashboardSessionIssuer interface {
 	IssueAccessToken(userID string, role domain.DashboardRole) (token string, expiresInSeconds int, err error)
+	// IssueSessionAccessToken (PR-2) carries the app session id ("sid") so every request can be
+	// checked against that session's revocation.
+	IssueSessionAccessToken(userID string, role domain.DashboardRole, sessionID string) (token string, expiresInSeconds int, err error)
+}
+
+// MobileSessionRepository (PR-2, contratos G2) stores app sessions and their rotating refresh
+// tokens (hashes only).
+type MobileSessionRepository interface {
+	Insert(ctx context.Context, session domain.MobileSession, tokenHash []byte) error
+	// Rotate consumes oldHash and stores newHash atomically. A token presented twice revokes the
+	// session (ErrMobileRefreshReused); unknown/expired/revoked/wrong-device gives ErrMobileRefreshInvalid.
+	Rotate(ctx context.Context, oldHash, newHash []byte, deviceID uuid.UUID, now time.Time) (domain.MobileSession, error)
+	FindByID(ctx context.Context, id uuid.UUID) (domain.MobileSession, error)
+	FindByTokenHash(ctx context.Context, hash []byte) (domain.MobileSession, error)
+	ListActiveByUser(ctx context.Context, userID domain.DashboardUserID, now time.Time) ([]domain.MobileSession, error)
+	Revoke(ctx context.Context, id uuid.UUID, reason string) error
+	RevokeAllForUser(ctx context.Context, userID domain.DashboardUserID, reason string) (int, error)
+	TouchTotp(ctx context.Context, id uuid.UUID, at time.Time) error
 }

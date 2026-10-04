@@ -9,6 +9,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/google/uuid"
+
 	"github.com/exotermo/prelo-core/internal/domain"
 )
 
@@ -40,6 +42,7 @@ type DashboardAuthService struct {
 	totp          DashboardTotpProvider
 	hasher        DashboardPasswordHasher
 	sessions      DashboardSessionIssuer
+	mobile        MobileSessionRepository
 }
 
 func NewDashboardAuthService(users DashboardUserRepository, tokens DashboardAuthTokenRepository, recoveryCodes DashboardRecoveryCodeRepository,
@@ -111,6 +114,7 @@ func (s *DashboardAuthService) ChangeRole(ctx context.Context, actorID, targetID
 	if err := s.users.Update(ctx, user); err != nil {
 		return domain.DashboardUser{}, err
 	}
+	s.revokeMobileSessions(ctx, user.ID, "role_changed")
 	return user, nil
 }
 
@@ -246,31 +250,155 @@ func (s *DashboardAuthService) ConfirmTotp(ctx context.Context, challenge, code 
 // VerifyTotp is the normal (non-setup) second factor: a 6-digit code, or one of the 8 recovery
 // codes if the authenticator app is unavailable.
 func (s *DashboardAuthService) VerifyTotp(ctx context.Context, challenge, code string) (DashboardSession, error) {
-	user, token, err := s.userAndTokenForActiveChallenge(ctx, challenge)
+	user, err := s.passSecondFactor(ctx, challenge, code)
 	if err != nil {
 		return DashboardSession{}, err
 	}
+	return s.issueSession(ctx, user.ID, user.Role)
+}
+
+// passSecondFactor checks a login challenge's TOTP (or recovery) code and consumes the challenge —
+// shared by the web session (VerifyTotp) and the app session (MobileVerify, PR-2).
+func (s *DashboardAuthService) passSecondFactor(ctx context.Context, challenge, code string) (domain.DashboardUser, error) {
+	user, token, err := s.userAndTokenForActiveChallenge(ctx, challenge)
+	if err != nil {
+		return domain.DashboardUser{}, err
+	}
 	if !user.TOTPEnabled || user.TOTPSecretEncrypted == nil {
-		return DashboardSession{}, ErrDashboardInvalidCode
+		return domain.DashboardUser{}, ErrDashboardInvalidCode
 	}
-	valid := false
-	secret, err := s.mfaCipher.Decrypt(user.TOTPSecretEncrypted, aad(user.ID))
-	if err == nil && s.totp.Validate(code, string(secret)) {
-		valid = true
-	}
+	valid := s.validTotp(user, code)
 	if !valid {
 		valid, err = s.tryRecoveryCode(ctx, user.ID, code)
 		if err != nil {
-			return DashboardSession{}, err
+			return domain.DashboardUser{}, err
 		}
 	}
 	if !valid {
-		return DashboardSession{}, s.rejectChallenge(ctx, token)
+		return domain.DashboardUser{}, s.rejectChallenge(ctx, token)
 	}
 	if err := s.tokens.Consume(ctx, token.ID); err != nil {
-		return DashboardSession{}, err
+		return domain.DashboardUser{}, err
 	}
-	return s.issueSession(ctx, user.ID, user.Role)
+	return user, nil
+}
+
+func (s *DashboardAuthService) validTotp(user domain.DashboardUser, code string) bool {
+	if !user.TOTPEnabled || user.TOTPSecretEncrypted == nil {
+		return false
+	}
+	secret, err := s.mfaCipher.Decrypt(user.TOTPSecretEncrypted, aad(user.ID))
+	return err == nil && s.totp.Validate(code, string(secret))
+}
+
+// --- PR-2: app sessions (docs/integracoes/sessao-mobile.md) ---
+
+// SetMobileSessions enables the Work Control app's sessions.
+func (s *DashboardAuthService) SetMobileSessions(mobile MobileSessionRepository) { s.mobile = mobile }
+
+type MobileSessionTokens struct {
+	AccessToken      string
+	ExpiresIn        int
+	RefreshToken     string
+	RefreshExpiresAt time.Time
+	SessionID        uuid.UUID
+}
+
+type MobileDevice struct {
+	ID       uuid.UUID
+	Name     string
+	Platform string
+}
+
+// MobileVerify finishes an app login: same challenge and second factor as the web, but the refresh
+// token comes back in the body, bound to one device. Signing in again on the same device replaces
+// that device's previous session.
+func (s *DashboardAuthService) MobileVerify(ctx context.Context, challenge, code string, device MobileDevice) (MobileSessionTokens, error) {
+	if s.mobile == nil {
+		return MobileSessionTokens{}, ErrMobileSessionNotFound
+	}
+	now := time.Now().UTC()
+	session, err := domain.NewMobileSession(domain.DashboardUserID{}, device.ID, device.Name, device.Platform, now)
+	if err != nil {
+		return MobileSessionTokens{}, err // validate the device before spending the challenge
+	}
+	user, err := s.passSecondFactor(ctx, challenge, code)
+	if err != nil {
+		return MobileSessionTokens{}, err
+	}
+	session.UserID = user.ID
+	if existing, err := s.mobile.ListActiveByUser(ctx, user.ID, now); err == nil {
+		for _, old := range existing {
+			if old.DeviceID == device.ID {
+				_ = s.mobile.Revoke(ctx, old.ID, "replaced")
+			}
+		}
+	}
+	raw, hash := newRawToken()
+	if err := s.mobile.Insert(ctx, session, hash); err != nil {
+		return MobileSessionTokens{}, err
+	}
+	return s.mobileTokens(user, session, raw)
+}
+
+// MobileRefresh rotates the device's refresh token. Reusing a spent one revokes the session.
+func (s *DashboardAuthService) MobileRefresh(ctx context.Context, rawRefresh string, deviceID uuid.UUID) (MobileSessionTokens, error) {
+	if s.mobile == nil || strings.TrimSpace(rawRefresh) == "" {
+		return MobileSessionTokens{}, ErrMobileRefreshInvalid
+	}
+	raw, hash := newRawToken()
+	session, err := s.mobile.Rotate(ctx, hashToken(rawRefresh), hash, deviceID, time.Now().UTC())
+	if err != nil {
+		return MobileSessionTokens{}, err
+	}
+	user, err := s.users.FindByID(ctx, session.UserID)
+	if err != nil {
+		return MobileSessionTokens{}, err
+	}
+	return s.mobileTokens(user, session, raw)
+}
+
+// MobileLogout ends the device's session. Unknown tokens are ignored (logout is idempotent).
+func (s *DashboardAuthService) MobileLogout(ctx context.Context, rawRefresh string, deviceID uuid.UUID) {
+	if s.mobile == nil || strings.TrimSpace(rawRefresh) == "" {
+		return
+	}
+	session, err := s.mobile.FindByTokenHash(ctx, hashToken(rawRefresh))
+	if err == nil && session.DeviceID == deviceID {
+		_ = s.mobile.Revoke(ctx, session.ID, "logout")
+	}
+}
+
+func (s *DashboardAuthService) mobileTokens(user domain.DashboardUser, session domain.MobileSession, rawRefresh string) (MobileSessionTokens, error) {
+	access, expiresIn, err := s.sessions.IssueSessionAccessToken(user.ID.String(), user.Role, session.ID.String())
+	if err != nil {
+		return MobileSessionTokens{}, err
+	}
+	return MobileSessionTokens{AccessToken: access, ExpiresIn: expiresIn, RefreshToken: rawRefresh,
+		RefreshExpiresAt: session.IdleExpiresAt, SessionID: session.ID}, nil
+}
+
+// ConfirmStepUp (contratos G9) checks a fresh TOTP code for an app session (recovery codes don't
+// count here) and records it, so HIGH-risk approvals in the next few minutes don't ask again.
+func (s *DashboardAuthService) ConfirmStepUp(ctx context.Context, sessionID uuid.UUID, userID domain.DashboardUserID, code string) error {
+	if s.mobile == nil {
+		return ErrStepUpRequired
+	}
+	user, err := s.users.FindByID(ctx, userID)
+	if err != nil {
+		return err
+	}
+	if !s.validTotp(user, strings.TrimSpace(code)) {
+		return ErrStepUpRequired
+	}
+	return s.mobile.TouchTotp(ctx, sessionID, time.Now().UTC())
+}
+
+// revokeMobileSessions ends every app session of a user whose trust changed (role, password).
+func (s *DashboardAuthService) revokeMobileSessions(ctx context.Context, userID domain.DashboardUserID, reason string) {
+	if s.mobile != nil {
+		_, _ = s.mobile.RevokeAllForUser(ctx, userID, reason)
+	}
 }
 
 // Refresh exchanges a still-valid refresh token (from the HttpOnly cookie) for a new access
@@ -332,7 +460,11 @@ func (s *DashboardAuthService) ResetPassword(ctx context.Context, rawToken, pass
 	if err != nil {
 		return err
 	}
-	return s.users.Update(ctx, user.WithPassword(hash).WithSuccessfulLogin())
+	if err := s.users.Update(ctx, user.WithPassword(hash).WithSuccessfulLogin()); err != nil {
+		return err
+	}
+	s.revokeMobileSessions(ctx, user.ID, "password_reset")
+	return nil
 }
 
 // --- helpers ---
