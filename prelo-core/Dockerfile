@@ -1,0 +1,17 @@
+FROM golang:1.26-alpine AS build
+WORKDIR /workspace
+COPY go.mod go.sum ./
+RUN go mod download
+COPY . .
+RUN go build -mod=readonly -o /workspace/prelo ./cmd/prelo
+
+FROM alpine:3.20
+RUN addgroup -S prelo && adduser -S prelo -G prelo
+# Fase PA: sealed project files live on a named volume mounted here. Creating the directory in the
+# image (owned by the unprivileged user) is what makes Docker initialize the volume writable.
+RUN mkdir -p /data/project-files && chown prelo:prelo /data/project-files && chmod 700 /data/project-files
+WORKDIR /app
+COPY --from=build --chown=prelo:prelo /workspace/prelo /app/prelo
+USER prelo
+EXPOSE 8080
+ENTRYPOINT ["/app/prelo"]
