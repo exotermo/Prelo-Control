@@ -1,7 +1,9 @@
 # Contrato v1 — Sessão do app (Work Control) e identidade
 
-> **Status:** G1 e G3 (`/me`, workspace) **implementados** no PR-1 (2026-10-04). G2 e G9 (sessão mobile,
-> confirmação com TOTP) **congelados, ainda não implementados** (PR-2). Lacunas G1, G2, G3 e G9
+> **Status: implementado** — G1 e G3 no PR-1, G2 e G9 no PR-2 (2026-10-04). Detalhes da implementação:
+> refresh tem 256 bits aleatórios (só o hash é guardado), access token do app carrega `sid` e é recusado
+> na hora quando a sessão é encerrada, e a resposta de login/refresh é
+> `{accessToken, expiresIn, refreshToken, refreshExpiresAt, sessionId}`. Lacunas G1, G2, G3 e G9
 > de `docs/CONTRATOS.md`. Identidade única = a do Prelo (e-mail + senha + TOTP). Nada de Keycloak.
 
 ## Princípios
@@ -43,14 +45,16 @@ compatível (campo já existe).
    `DELETE /api/v1/me/sessions/{sessionId}` (revoga). ADMIN pode revogar sessões de outros usuários.
    Usuário desativado ou papel alterado → sessões revogadas.
 
-Erros: `401 invalid_refresh` (app volta ao login), `401 refresh_reused` (idem + aviso), `429` rate limit
-(mesma política do login web).
+Erros: `401 invalid_refresh` (app volta ao login), `401 refresh_reused` (idem + aviso); verify com código
+errado segue as mesmas regras do login web (tentativas por desafio, bloqueio por conta).
+Sessões também caem quando um admin troca o papel do usuário ou quando a senha é redefinida.
+Admin: `GET/DELETE /api/v1/users/{userId}/sessions` (escopo `users:manage`).
 
 ## G9 — Confirmação reforçada para risco ALTO
 
 `POST /api/v1/approvals/{id}/approve` de uma aprovação HIGH vinda de sessão mobile exige
-`{ "totpCode": "123456" }` (ou TOTP validado nos últimos 5 min na mesma sessão). Sem isso: `403
-step_up_required`. Negar nunca exige.
+`{ "totpCode": "123456" }` (ou TOTP validado nos últimos 5 min na mesma sessão — o próprio login conta).
+Sem isso: `403 step_up_required`. Código de recuperação não vale aqui. Negar nunca exige.
 
 ## Autorização no servidor (sem mudanças de regra)
 
