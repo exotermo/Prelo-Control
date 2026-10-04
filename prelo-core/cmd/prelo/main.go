@@ -136,6 +136,9 @@ func main() {
 		}
 
 		sweeper := worker.NewSweeper(jobRepo, processJob, 5*time.Second, 20)
+		// Fase T: approvals by short code (owner on WhatsApp) and expiry of unanswered ones.
+		decideApproval.SetCodeRepository(approvalRepo)
+		sweeper.SetApprovalExpirer(decideApproval)
 		go sweeper.Run(ctx)
 
 		taskHandler := api.NewTaskHandler(createTask, taskRepo, executionRepo, enqueueExecution)
@@ -185,6 +188,7 @@ func main() {
 		api.RegisterSettingsRoutes(mux, settingsHandler)
 
 		var checkServerHealthUC *application.CheckServerHealthUseCase
+		var serverRepoForTools *postgres.ServerRepository
 		// Fase S1: server registration + on-demand SSH health check. Optional, same
 		// graceful-degradation pattern as the bridge integration — a fresh deployment that
 		// hasn't set the new key yet keeps running everything else.
@@ -199,6 +203,7 @@ func main() {
 			registerServer := application.NewRegisterServerUseCase(serverRepo, serverssh.NewRegistrar(serverssh.DefaultTimeout), serverCredentialCipher)
 			checkServerHealth := application.NewCheckServerHealthUseCase(serverRepo, serverssh.NewChecker(serverCredentialCipher, serverssh.DefaultTimeout))
 			checkServerHealthUC = checkServerHealth
+			serverRepoForTools = serverRepo
 			serverHandler := api.NewServerHandler(registerServer, checkServerHealth, serverRepo)
 			api.RegisterServerRoutes(mux, serverHandler)
 		}
@@ -214,7 +219,28 @@ func main() {
 		// Fase C1: clients (CRM), search, home (recent + pending) and client timeline.
 		clientRepo := postgres.NewClientRepository(pool)
 		createTask.SetContactResolver(clientRepo) // Fase C2: WhatsApp sender → client
-		workspace := application.NewWorkspaceService(clientRepo, projectMemberRepo, postgres.NewWorkspaceReadModel(pool))
+		workspaceReads := postgres.NewWorkspaceReadModel(pool)
+		workspace := application.NewWorkspaceService(clientRepo, projectMemberRepo, workspaceReads)
+
+		// Fase T: real tools for the agents. Risk (and so whether the owner must approve) is set
+		// on each tool's definition; PermissionPolicy decides, never the model.
+		toolRegistry.Register(
+			tools.NewSearchWorkspaceTool(taskRepo, workspaceReads),
+			tools.NewGetClientTool(clientRepo),
+			tools.NewAddClientNoteTool(clientRepo),
+			tools.NewInspectWebsiteTool(webhook.NewHTTPClient(cfg.Integrations.AllowPrivateTargets)),
+		)
+		if serverRepoForTools != nil {
+			toolRegistry.Register(
+				tools.NewListServersTool(taskRepo, serverRepoForTools),
+				tools.NewCheckServerHealthTool(taskRepo, serverRepoForTools, checkServerHealthUC),
+			)
+		}
+		if bridgeClient.Configured() {
+			toolRegistry.Register(tools.NewSendWhatsAppTool(clientRepo, bridgeClient))
+			// Fase T: approvals an agent waits on are also sent to the owner's WhatsApp.
+			agentLoop.SetOwnerNotifier(application.NewOwnerApprovalNotifier(approvalRepo, toolCallRepo, toolRegistry, bridgeClient))
+		}
 		api.RegisterWorkspaceRoutes(mux, api.NewWorkspaceHandler(workspace, clientRepo))
 
 		// Fase PA: project settings (default agent, instructions) feed task creation and context.

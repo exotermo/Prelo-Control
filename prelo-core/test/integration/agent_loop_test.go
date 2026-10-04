@@ -2,6 +2,7 @@ package integration
 
 import (
 	"context"
+	"github.com/jackc/pgx/v5/pgxpool"
 	"strings"
 	"testing"
 
@@ -16,18 +17,20 @@ import (
 
 // toolAwareLlmGateway mirrors MockProvider.java's own convention exactly (see its doc
 // comment): asks for targetTool once per execution, then answers FINAL as soon as it sees a
-// "[tool_result:" message — so these tests exercise the real loop logic the same way the real
+// "tool" message (Fase T) — so these tests exercise the real loop logic the same way the real
 // Gateway (in mock mode) would, without needing an HTTP round trip to it.
 type toolAwareLlmGateway struct {
 	calls        int
+	lastRequest  gateway.ChatRequest
 	targetTool   string
 	toolArgsJSON string // defaults to "{}" when empty
 }
 
 func (g *toolAwareLlmGateway) Chat(_ context.Context, req gateway.ChatRequest, requestID string) (gateway.ChatResponse, error) {
 	g.calls++
+	g.lastRequest = req
 	last := req.Messages[len(req.Messages)-1]
-	if len(req.Tools) > 0 && g.targetTool != "" && !strings.HasPrefix(last.Content, "[tool_result:") {
+	if len(req.Tools) > 0 && g.targetTool != "" && last.Role != "tool" {
 		args := g.toolArgsJSON
 		if args == "" {
 			args = "{}"
@@ -48,6 +51,9 @@ type agentLoopFixture struct {
 	process      *application.ProcessJobUseCase
 	decide       *application.DecideApprovalUseCase
 	llm          *toolAwareLlmGateway
+	loop         *application.RunAgentLoopUseCase
+	registry     *toolregistry.Static
+	pool         *pgxpool.Pool
 }
 
 func setupAgentLoopFixture(t *testing.T, targetTool string) agentLoopFixture {
@@ -81,6 +87,7 @@ func setupAgentLoopFixture(t *testing.T, targetTool string) agentLoopFixture {
 	return agentLoopFixture{
 		taskRepo: taskRepo, execRepo: execRepo, jobRepo: jobRepo, toolCallRepo: toolCallRepo,
 		approvalRepo: approvalRepo, turnRepo: turnRepo, enqueue: enqueue, process: process, decide: decide, llm: llm,
+		loop: loop, registry: registry, pool: pool,
 	}
 }
 

@@ -12,7 +12,7 @@ import (
 // defaultApprovalTTL is how long a REQUIRE_APPROVAL request stays decidable before it reads as
 // EXPIRED (etapa 8's "expira corretamente"). Not yet configurable per tool/tenant — every
 // moderate-or-higher call gets the same window until a real need to vary it shows up.
-const defaultApprovalTTL = 15 * time.Minute
+const defaultApprovalTTL = 30 * time.Minute
 
 // ToolExecutionLimits is a defense-in-depth quota for in-process tools. It is not a substitute
 // for an OS sandbox: tools that execute processes or access a filesystem must remain denied until
@@ -108,7 +108,10 @@ func (uc *InvokeToolUseCase) Invoke(ctx context.Context, executionID domain.Exec
 		resolved, err := uc.calls.Update(ctx, call.Resolved(outcome, nil, nil))
 		return resolved, nil, err
 	case domain.DecisionRequireApproval:
-		scope := fmt.Sprintf("agent %s requests tool %q (risk %s) with args %s", agent.AgentID.String(), toolDef.Name, toolDef.RiskLevel, argsJSON)
+		scope := fmt.Sprintf("agente %s pede a ferramenta %q (risco %s) com argumentos %s", agent.AgentID.String(), toolDef.Name, toolDef.RiskLevel, argsJSON)
+		if toolDef.Impact != "" {
+			scope += " — impacto: " + toolDef.Impact
+		}
 		approval := domain.NewApprovalRequest(call.ID, scope, defaultApprovalTTL)
 		if err := uc.approvals.Insert(ctx, approval); err != nil {
 			return domain.ToolCall{}, nil, err

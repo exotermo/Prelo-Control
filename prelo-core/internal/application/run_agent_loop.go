@@ -2,6 +2,8 @@ package application
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -17,10 +19,41 @@ import (
 // tools. A hard ceiling, not yet tunable per agent/tenant.
 const maxLLMCalls = 8
 
-// toolResultPrefix must match MockProvider's TOOL_RESULT_PREFIX exactly (see its doc comment)
-// — this is the mock-only convention for carrying a tool's result back as a plain message,
-// until a real provider's structured tool_use/tool_result protocol is wired in.
-const toolResultPrefix = "[tool_result:"
+// toolUsePrefix marks an LLM turn whose output was a tool request ("tool_use:name(args)") —
+// the ledger format, unchanged since Fase B, from which the structured history is rebuilt.
+const toolUsePrefix = "tool_use:"
+
+// toolCallID is the provider-neutral id pairing a tool request with its result (Fase T). It is
+// derived from the LLM turn that asked for the tool, so a resumed execution rebuilds exactly the
+// same ids from the ledger without storing anything new.
+func toolCallID(executionID domain.ExecutionID, llmTurnNumber int) string {
+	sum := sha256.Sum256([]byte(domain.TurnRequestID(executionID, llmTurnNumber)))
+	return "call_" + hex.EncodeToString(sum[:12])
+}
+
+// parseToolUse splits a ledger "tool_use:name(args)" output back into name and args.
+func parseToolUse(output string) (string, string, bool) {
+	if !strings.HasPrefix(output, toolUsePrefix) {
+		return "", "", false
+	}
+	rest := strings.TrimPrefix(output, toolUsePrefix)
+	open := strings.Index(rest, "(")
+	if open <= 0 || !strings.HasSuffix(rest, ")") {
+		return "", "", false
+	}
+	return rest[:open], rest[open+1 : len(rest)-1], true
+}
+
+func toolRequestMessage(id, name, args string) gateway.Message {
+	return gateway.Message{Role: "assistant", ToolCallID: id, ToolName: name, ToolArgsJSON: args}
+}
+
+func toolResultMessage(id, name, result string) gateway.Message {
+	if strings.TrimSpace(result) == "" {
+		result = "(sem saída)"
+	}
+	return gateway.Message{Role: "tool", ToolCallID: id, ToolName: name, Content: result}
+}
 
 type LoopOutcome int
 
@@ -57,7 +90,11 @@ type RunAgentLoopUseCase struct {
 	suspensions ExecutionSuspensionRepository
 	jobs        ExecutionJobRepository
 	events      EventPublisher
+	owner       *OwnerApprovalNotifier
 }
+
+// SetOwnerNotifier wires Fase T: every approval an agent waits on is also sent to the owner's WhatsApp.
+func (uc *RunAgentLoopUseCase) SetOwnerNotifier(owner *OwnerApprovalNotifier) { uc.owner = owner }
 
 // SetEventPublisher wires Fase I's approval.pending webhook event.
 func (uc *RunAgentLoopUseCase) SetEventPublisher(events EventPublisher) { uc.events = events }
@@ -80,6 +117,7 @@ func (uc *RunAgentLoopUseCase) Run(ctx context.Context, task domain.Task, agent 
 	messages := initialMessages(task, agent, snapshot)
 	nextTurnNumber := 0
 	llmCalls := 0
+	pendingCallID, pendingTool := "", ""
 	for _, turn := range existingTurns {
 		// A turn with neither Output nor Error is not "in progress" — a legitimate
 		// REQUIRE_APPROVAL/SUBTASK wait always gets its turn completed (by
@@ -100,11 +138,16 @@ func (uc *RunAgentLoopUseCase) Run(ctx context.Context, task domain.Task, agent 
 		case domain.TurnLLMCall:
 			llmCalls++
 			if turn.Output != nil {
-				messages = append(messages, gateway.Message{Role: "assistant", Content: *turn.Output})
+				if name, args, ok := parseToolUse(*turn.Output); ok {
+					pendingCallID, pendingTool = toolCallID(execution.ID, turn.TurnNumber), name
+					messages = append(messages, toolRequestMessage(pendingCallID, name, args))
+				} else {
+					messages = append(messages, gateway.Message{Role: "assistant", Content: *turn.Output})
+				}
 			}
 		case domain.TurnToolCall:
 			if turn.Output != nil {
-				messages = append(messages, gateway.Message{Role: "user", Content: toolResultPrefix + turn.Input + "] " + *turn.Output})
+				messages = append(messages, toolResultMessage(pendingCallID, pendingTool, *turn.Output))
 			}
 		}
 	}
@@ -123,7 +166,11 @@ func (uc *RunAgentLoopUseCase) Run(ctx context.Context, task domain.Task, agent 
 			// guards against ever silently re-calling the Gateway for a turn that has a
 			// recorded outcome).
 			if already.Output != nil {
-				messages = append(messages, gateway.Message{Role: "assistant", Content: *already.Output})
+				if name, args, ok := parseToolUse(*already.Output); ok {
+					messages = append(messages, toolRequestMessage(toolCallID(execution.ID, turnNumber), name, args))
+				} else {
+					messages = append(messages, gateway.Message{Role: "assistant", Content: *already.Output})
+				}
 				nextTurnNumber = turnNumber + 1
 				continue
 			}
@@ -172,10 +219,14 @@ func (uc *RunAgentLoopUseCase) Run(ctx context.Context, task domain.Task, agent 
 		}
 		log.Printf("agent-loop: execution=%s turn=%d requests tool=%s", execution.ID, turnNumber, resp.ToolName)
 
-		if _, err := uc.turns.Update(ctx, turn.Completed(fmt.Sprintf("tool_use:%s(%s)", resp.ToolName, resp.ToolArgsJSON))); err != nil {
+		if strings.TrimSpace(resp.ToolArgsJSON) == "" {
+			resp.ToolArgsJSON = "{}"
+		}
+		if _, err := uc.turns.Update(ctx, turn.Completed(fmt.Sprintf("%s%s(%s)", toolUsePrefix, resp.ToolName, resp.ToolArgsJSON))); err != nil {
 			return LoopResult{}, err
 		}
-		messages = append(messages, gateway.Message{Role: "assistant", Content: fmt.Sprintf("requesting tool %s with args %s", resp.ToolName, resp.ToolArgsJSON)})
+		callID := toolCallID(execution.ID, turnNumber)
+		messages = append(messages, toolRequestMessage(callID, resp.ToolName, resp.ToolArgsJSON))
 
 		toolTurnNumber := nextTurnNumber
 		toolTurnInput := resp.ToolName + "(" + resp.ToolArgsJSON + ")"
@@ -184,6 +235,19 @@ func (uc *RunAgentLoopUseCase) Run(ctx context.Context, task domain.Task, agent 
 			return LoopResult{}, err
 		}
 		nextTurnNumber = toolTurnNumber + 1
+
+		// Fase T: arguments are checked against the tool's schema before anything is recorded as
+		// a call or sent for approval — the model gets the error back and can correct itself.
+		if executor, ok := uc.tools.Find(resp.ToolName); ok {
+			if verr := domain.ValidateToolArgs(executor.Definition(), resp.ToolArgsJSON); verr != nil {
+				outcome := "error: " + verr.Error()
+				if _, err := uc.turns.Update(ctx, toolTurn.Completed(outcome)); err != nil {
+					return LoopResult{}, err
+				}
+				messages = append(messages, toolResultMessage(callID, resp.ToolName, outcome))
+				continue
+			}
+		}
 
 		toolCall, approvalID, err := uc.invokeTool.Invoke(ctx, execution.ID, resp.ToolName, resp.ToolArgsJSON)
 		if err != nil {
@@ -208,6 +272,9 @@ func (uc *RunAgentLoopUseCase) Run(ctx context.Context, task domain.Task, agent 
 				return LoopResult{}, err
 			}
 			log.Printf("agent-loop: execution=%s turn=%d suspended reason=APPROVAL approvalId=%s", execution.ID, toolTurnNumber, approvalID)
+			if uc.owner != nil && approvalID != nil {
+				uc.owner.Notify(ctx, *approvalID, task)
+			}
 			uc.events.Publish(ctx, task.ProjectID, domain.EventApprovalPending, map[string]any{
 				"taskId": task.ID.String(), "executionId": execution.ID.String(), "approvalId": approvalID.String(),
 				"tool": resp.ToolName, "description": task.Description,
@@ -218,7 +285,7 @@ func (uc *RunAgentLoopUseCase) Run(ctx context.Context, task domain.Task, agent 
 			if _, err := uc.turns.Update(ctx, toolTurn.Completed("DENIED by permission policy")); err != nil {
 				return LoopResult{}, err
 			}
-			messages = append(messages, gateway.Message{Role: "user", Content: toolResultPrefix + toolTurnInput + "] denied by permission policy"})
+			messages = append(messages, toolResultMessage(callID, resp.ToolName, "negado pela política de permissões"))
 
 		case domain.DecisionAllow:
 			// delegate_to_agent (Fase C), reached only if a future PermissionPolicy ever lets
@@ -248,7 +315,7 @@ func (uc *RunAgentLoopUseCase) Run(ctx context.Context, task domain.Task, agent 
 			if _, err := uc.turns.Update(ctx, toolTurn.Completed(outcome)); err != nil {
 				return LoopResult{}, err
 			}
-			messages = append(messages, gateway.Message{Role: "user", Content: toolResultPrefix + toolTurnInput + "] " + outcome})
+			messages = append(messages, toolResultMessage(callID, resp.ToolName, outcome))
 		}
 	}
 
@@ -288,7 +355,7 @@ func toolSpecsFor(agent domain.AgentDefinition, tools ToolRegistry) []gateway.To
 			continue
 		}
 		def := executor.Definition()
-		specs = append(specs, gateway.ToolSpec{Name: def.Name, Description: def.Description})
+		specs = append(specs, gateway.ToolSpec{Name: def.Name, Description: def.Description, InputSchema: def.InputSchema})
 	}
 	return specs
 }

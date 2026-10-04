@@ -21,6 +21,7 @@ func RegisterRoutes(mux *http.ServeMux, tasks *TaskHandler, chat *ChatHandler, t
 	mux.HandleFunc("GET /api/v1/approvals/{approvalId}", approvals.Get)
 	mux.HandleFunc("POST /api/v1/approvals/{approvalId}/approve", approvals.Approve)
 	mux.HandleFunc("POST /api/v1/approvals/{approvalId}/deny", approvals.Deny)
+	mux.HandleFunc("POST /api/v1/approvals/by-code/{code}/{decision}", approvals.DecideByCode)
 
 	// Fase D: read-only trace/tree views over what Fases A-C already persist.
 	mux.HandleFunc("GET /api/v1/tasks/{taskId}/executions/{executionId}/turns", observability.Turns)

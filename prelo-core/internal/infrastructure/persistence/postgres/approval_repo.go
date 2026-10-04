@@ -6,6 +6,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/exotermo/prelo-core/internal/application"
@@ -20,19 +21,59 @@ func NewApprovalRepository(pool *pgxpool.Pool) *ApprovalRepository {
 	return &ApprovalRepository{pool: pool}
 }
 
+// Insert retries with a fresh short code on the (rare) clash with another pending request's code.
 func (r *ApprovalRepository) Insert(ctx context.Context, approval domain.ApprovalRequest) error {
-	_, err := r.pool.Exec(ctx, `
-		INSERT INTO approval_requests
-			(id, tool_call_id, scope, status, requested_at, expires_at, decided_at, decided_by, approval_version)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)`,
-		approval.ID.Value, approval.ToolCallID.Value, approval.Scope, string(approval.Status),
-		approval.RequestedAt, approval.ExpiresAt, approval.DecidedAt, approval.DecidedBy, approval.Version)
-	return err
+	for attempt := 0; ; attempt++ {
+		var code *string
+		if approval.ShortCode != "" {
+			code = &approval.ShortCode
+		}
+		_, err := r.pool.Exec(ctx, `
+			INSERT INTO approval_requests
+				(id, tool_call_id, scope, status, requested_at, expires_at, decided_at, decided_by, approval_version, short_code)
+			VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`,
+			approval.ID.Value, approval.ToolCallID.Value, approval.Scope, string(approval.Status),
+			approval.RequestedAt, approval.ExpiresAt, approval.DecidedAt, approval.DecidedBy, approval.Version, code)
+		var pgErr *pgconn.PgError
+		if err != nil && errors.As(err, &pgErr) && pgErr.Code == "23505" && pgErr.ConstraintName == "approval_requests_pending_code_uk" && attempt < 8 {
+			approval.ShortCode = domain.NewShortCode()
+			continue
+		}
+		return err
+	}
 }
+
+// FindLatestByShortCode returns the newest request with this code (pending or not — the caller
+// tells the owner "already decided" / "expired" instead of "not found").
+func (r *ApprovalRepository) FindLatestByShortCode(ctx context.Context, code string) (domain.ApprovalRequest, error) {
+	row := r.pool.QueryRow(ctx, `SELECT `+approvalColumns+` FROM approval_requests
+		WHERE short_code = $1 ORDER BY (status = 'PENDING') DESC, requested_at DESC LIMIT 1`, code)
+	return scanApproval(row)
+}
+
+func (r *ApprovalRepository) ListDuePending(ctx context.Context, limit int) ([]domain.ApprovalRequest, error) {
+	rows, err := r.pool.Query(ctx, `SELECT `+approvalColumns+` FROM approval_requests
+		WHERE status = 'PENDING' AND expires_at < now() ORDER BY expires_at LIMIT $1`, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []domain.ApprovalRequest
+	for rows.Next() {
+		a, err := scanApproval(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, a)
+	}
+	return out, rows.Err()
+}
+
+const approvalColumns = "id, tool_call_id, scope, status, requested_at, expires_at, decided_at, decided_by, approval_version, short_code"
 
 func (r *ApprovalRepository) FindByID(ctx context.Context, id domain.ApprovalRequestID) (domain.ApprovalRequest, error) {
 	row := r.pool.QueryRow(ctx, `
-		SELECT id, tool_call_id, scope, status, requested_at, expires_at, decided_at, decided_by, approval_version
+		SELECT id, tool_call_id, scope, status, requested_at, expires_at, decided_at, decided_by, approval_version, short_code
 		  FROM approval_requests WHERE id = $1`, id.Value)
 	return scanApproval(row)
 }
@@ -58,7 +99,7 @@ func (r *ApprovalRepository) Update(ctx context.Context, approval domain.Approva
 
 func (r *ApprovalRepository) ListPending(ctx context.Context) ([]domain.ApprovalRequest, error) {
 	rows, err := r.pool.Query(ctx, `
-		SELECT id, tool_call_id, scope, status, requested_at, expires_at, decided_at, decided_by, approval_version
+		SELECT id, tool_call_id, scope, status, requested_at, expires_at, decided_at, decided_by, approval_version, short_code
 		  FROM approval_requests WHERE status = 'PENDING' ORDER BY requested_at`)
 	if err != nil {
 		return nil, err
@@ -82,7 +123,7 @@ func (r *ApprovalRepository) ListPending(ctx context.Context) ([]domain.Approval
 // nil projectID means the "unassigned" bucket (tasks.project_id IS NULL).
 func (r *ApprovalRepository) ListPendingByProject(ctx context.Context, projectID *uuid.UUID) ([]domain.ApprovalRequest, error) {
 	const base = `
-		SELECT ar.id, ar.tool_call_id, ar.scope, ar.status, ar.requested_at, ar.expires_at, ar.decided_at, ar.decided_by, ar.approval_version
+		SELECT ar.id, ar.tool_call_id, ar.scope, ar.status, ar.requested_at, ar.expires_at, ar.decided_at, ar.decided_by, ar.approval_version, ar.short_code
 		  FROM approval_requests ar
 		  JOIN tool_calls tc ON tc.id = ar.tool_call_id
 		  JOIN tasks t ON t.id = tc.task_id
@@ -113,13 +154,17 @@ func (r *ApprovalRepository) ListPendingByProject(ctx context.Context, projectID
 func scanApproval(row pgx.Row) (domain.ApprovalRequest, error) {
 	var a domain.ApprovalRequest
 	var status string
+	var code *string
 	if err := row.Scan(&a.ID.Value, &a.ToolCallID.Value, &a.Scope, &status, &a.RequestedAt,
-		&a.ExpiresAt, &a.DecidedAt, &a.DecidedBy, &a.Version); err != nil {
+		&a.ExpiresAt, &a.DecidedAt, &a.DecidedBy, &a.Version, &code); err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return domain.ApprovalRequest{}, application.ErrApprovalNotFound
 		}
 		return domain.ApprovalRequest{}, err
 	}
 	a.Status = domain.ApprovalStatus(status)
+	if code != nil {
+		a.ShortCode = *code
+	}
 	return a, nil
 }

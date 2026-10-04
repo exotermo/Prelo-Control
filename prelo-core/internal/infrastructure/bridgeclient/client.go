@@ -125,6 +125,31 @@ func (c *Client) ReplaceOwnerContacts(ctx context.Context, contacts []string) ([
 // CallError carries both a raw wrapped detail (safe only for server logs) and a fixed
 // non-leaking Message — same sanitized-error convention as gateway.CallError, so a bridge
 // outage or a rejected phone number never leaks response bodies to the browser.
+// SendWhatsApp queues a message to one contact through the bridge (Fase T, send_whatsapp_message —
+// only ever after the owner approved it). The bridge delivers it durably via its reply outbox.
+func (c *Client) SendWhatsApp(ctx context.Context, to, text string) error {
+	return c.postJSON(ctx, "/admin/outbound", map[string]string{"to": to, "text": text})
+}
+
+// NotifyOwners sends a text to every owner contact (Fase T: approval requests to the owner).
+func (c *Client) NotifyOwners(ctx context.Context, text string) error {
+	return c.postJSON(ctx, "/admin/owner-notifications", map[string]string{"text": text})
+}
+
+func (c *Client) postJSON(ctx context.Context, path string, payload any) error {
+	body, err := json.Marshal(payload)
+	if err != nil {
+		return err
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+path, bytes.NewReader(body))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("X-Admin-Token", c.adminToken)
+	req.Header.Set("Content-Type", "application/json")
+	return c.do(req, nil)
+}
+
 type CallError struct {
 	Status  int
 	Message string

@@ -1,6 +1,9 @@
 package domain
 
 import (
+	"crypto/rand"
+	"math/big"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -36,13 +39,49 @@ type ApprovalRequest struct {
 	DecidedAt   *time.Time
 	DecidedBy   *string
 	Version     int64
+	// ShortCode (Fase T) identifies the request in a WhatsApp answer ("SIM K7Q2").
+	ShortCode string
+}
+
+// shortCodeAlphabet has no look-alikes (0/O, 1/I/L, 5/S, 8/B, 2/Z) — the owner types it on a phone.
+const shortCodeAlphabet = "ACDEFGHJKMNPQRTUVWXY3479"
+
+// ShortCodeLength: 24^4 ≈ 330k codes, unique among the (few) pending requests at a time.
+const ShortCodeLength = 4
+
+func NewShortCode() string {
+	var b strings.Builder
+	for i := 0; i < ShortCodeLength; i++ {
+		n, err := rand.Int(rand.Reader, big.NewInt(int64(len(shortCodeAlphabet))))
+		if err != nil {
+			panic(err)
+		}
+		b.WriteByte(shortCodeAlphabet[n.Int64()])
+	}
+	return b.String()
+}
+
+// NormalizeShortCode accepts what a person types ("k7q2", " K7Q2 ") and returns the stored form.
+func NormalizeShortCode(raw string) string { return strings.ToUpper(strings.TrimSpace(raw)) }
+
+// Expire closes a PENDING request whose deadline passed, so the waiting execution can move on.
+func (a ApprovalRequest) Expire() (ApprovalRequest, error) {
+	now := time.Now().UTC()
+	if a.Status != ApprovalPending || !now.After(a.ExpiresAt) {
+		return ApprovalRequest{}, &InvalidTransitionError{Entity: "ApprovalRequest", From: string(a.Status), To: string(ApprovalExpired)}
+	}
+	a.Status = ApprovalExpired
+	a.DecidedAt = &now
+	by := "system:expired"
+	a.DecidedBy = &by
+	return a, nil
 }
 
 func NewApprovalRequest(toolCallID ToolCallID, scope string, ttl time.Duration) ApprovalRequest {
 	now := time.Now().UTC()
 	return ApprovalRequest{
 		ID: NewApprovalRequestID(), ToolCallID: toolCallID, Scope: scope,
-		Status: ApprovalPending, RequestedAt: now, ExpiresAt: now.Add(ttl),
+		Status: ApprovalPending, RequestedAt: now, ExpiresAt: now.Add(ttl), ShortCode: NewShortCode(),
 	}
 }
 

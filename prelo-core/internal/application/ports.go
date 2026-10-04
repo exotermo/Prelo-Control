@@ -158,6 +158,13 @@ type ApprovalRepository interface {
 	ListPendingByProject(ctx context.Context, projectID *uuid.UUID) ([]domain.ApprovalRequest, error)
 }
 
+// ApprovalCodeRepository (Fase T) is the WhatsApp side of approvals: find a request by the short
+// code the owner typed, and list pending requests whose deadline passed.
+type ApprovalCodeRepository interface {
+	FindLatestByShortCode(ctx context.Context, code string) (domain.ApprovalRequest, error)
+	ListDuePending(ctx context.Context, limit int) ([]domain.ApprovalRequest, error)
+}
+
 // ExecutionJobRepository mirrors the etapa 6.5 queue design: Insert creates a PENDING job
 // alongside a fresh Execution, Claim atomically transitions it to CLAIMED for exactly one
 // caller, and MarkDone/MarkFailed close it out. Retry/backoff/lease-based reclaiming is the

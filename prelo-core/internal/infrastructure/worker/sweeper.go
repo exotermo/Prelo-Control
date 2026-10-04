@@ -19,7 +19,16 @@ type Sweeper struct {
 	process   *application.ProcessJobUseCase
 	interval  time.Duration
 	batchSize int
+	approvals approvalExpirer
 }
+
+// approvalExpirer (Fase T) closes approvals nobody answered in time, waking their executions.
+type approvalExpirer interface {
+	ExpireDue(ctx context.Context) (int, error)
+}
+
+// SetApprovalExpirer makes each tick also expire overdue approvals.
+func (s *Sweeper) SetApprovalExpirer(approvals approvalExpirer) { s.approvals = approvals }
 
 func NewSweeper(jobs application.ExecutionJobRepository, process *application.ProcessJobUseCase, interval time.Duration, batchSize int) *Sweeper {
 	return &Sweeper{jobs: jobs, process: process, interval: interval, batchSize: batchSize}
@@ -39,6 +48,13 @@ func (s *Sweeper) Run(ctx context.Context) {
 }
 
 func (s *Sweeper) tick(ctx context.Context) {
+	if s.approvals != nil {
+		if n, err := s.approvals.ExpireDue(ctx); err != nil {
+			log.Printf("sweeper: expiring approvals failed: %v", err)
+		} else if n > 0 {
+			log.Printf("sweeper: expired %d unanswered approval(s)", n)
+		}
+	}
 	requeued, err := s.jobs.RequeueOrphaned(ctx)
 	if err != nil {
 		log.Printf("sweeper: requeue orphaned jobs failed: %v", err)

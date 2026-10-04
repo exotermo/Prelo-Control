@@ -19,6 +19,7 @@ import (
 // delegate_to_agent (Fase C): approving it only creates the child Task — the parent execution
 // must stay suspended (now waiting on the child, not the approval) until that child finishes.
 type DecideApprovalUseCase struct {
+	codes       ApprovalCodeRepository
 	approvals   ApprovalRepository
 	calls       ToolCallRepository
 	tools       ToolRegistry
@@ -30,6 +31,57 @@ type DecideApprovalUseCase struct {
 
 func NewDecideApprovalUseCase(approvals ApprovalRepository, calls ToolCallRepository, tools ToolRegistry, executions ExecutionRepository, turns ExecutionTurnRepository, suspensions ExecutionSuspensionRepository, jobs ExecutionJobRepository) *DecideApprovalUseCase {
 	return &DecideApprovalUseCase{approvals: approvals, calls: calls, tools: tools, executions: executions, turns: turns, suspensions: suspensions, jobs: jobs}
+}
+
+// SetCodeRepository enables Fase T's WhatsApp decisions (by short code) and expiry.
+func (uc *DecideApprovalUseCase) SetCodeRepository(codes ApprovalCodeRepository) { uc.codes = codes }
+
+// DecideByCode is the owner's WhatsApp answer ("SIM K7Q2"). It goes through exactly the same
+// Approve/Deny as the dashboard, so a request is still decided at most once; an expired or
+// already-decided one comes back as an InvalidTransitionError the caller reports to the owner.
+func (uc *DecideApprovalUseCase) DecideByCode(ctx context.Context, code string, approve bool, decidedBy string) (domain.ApprovalRequest, error) {
+	if uc.codes == nil {
+		return domain.ApprovalRequest{}, ErrApprovalNotFound
+	}
+	approval, err := uc.codes.FindLatestByShortCode(ctx, domain.NormalizeShortCode(code))
+	if err != nil {
+		return domain.ApprovalRequest{}, err
+	}
+	if approve {
+		return uc.Approve(ctx, approval.ID, decidedBy)
+	}
+	return uc.Deny(ctx, approval.ID, decidedBy)
+}
+
+// ExpireDue closes pending requests whose deadline passed and wakes their executions up with the
+// refusal, so nothing waits forever on an owner who never answered.
+func (uc *DecideApprovalUseCase) ExpireDue(ctx context.Context) (int, error) {
+	if uc.codes == nil {
+		return 0, nil
+	}
+	due, err := uc.codes.ListDuePending(ctx, 20)
+	if err != nil {
+		return 0, err
+	}
+	expired := 0
+	for _, approval := range due {
+		closed, err := approval.Expire()
+		if err != nil {
+			continue
+		}
+		if _, err := uc.approvals.Update(ctx, closed); err != nil {
+			continue // decided concurrently — whoever won handles the execution
+		}
+		if call, err := uc.calls.FindByID(ctx, approval.ToolCallID); err == nil {
+			outcome := domain.OutcomeDenied
+			_, _ = uc.calls.Update(ctx, call.Resolved(outcome, nil, nil))
+		}
+		if err := uc.resumeSuspendedExecution(ctx, approval.ID, "expirou: o dono não respondeu a tempo — a ação não foi executada"); err != nil {
+			return expired, err
+		}
+		expired++
+	}
+	return expired, nil
 }
 
 func (uc *DecideApprovalUseCase) Approve(ctx context.Context, id domain.ApprovalRequestID, decidedBy string) (domain.ApprovalRequest, error) {
@@ -119,7 +171,7 @@ func (uc *DecideApprovalUseCase) Deny(ctx context.Context, id domain.ApprovalReq
 		outcome := domain.OutcomeDenied
 		_, _ = uc.calls.Update(ctx, call.Resolved(outcome, nil, nil))
 	}
-	if err := uc.resumeSuspendedExecution(ctx, id, "denied by human approver"); err != nil {
+	if err := uc.resumeSuspendedExecution(ctx, id, "negado pelo dono — a ação não foi executada"); err != nil {
 		return domain.ApprovalRequest{}, err
 	}
 	return denied, nil

@@ -344,6 +344,10 @@ func RequestID(ctx context.Context) string {
 }
 
 func requiredScope(method, path string) string {
+	// Fase T: the owner's WhatsApp answer, relayed only by prelo-messaging-bridge.
+	if strings.HasPrefix(path, "/api/v1/approvals/by-code/") {
+		return "approvals:decide-owner"
+	}
 	// Fase C1: clients (CRM), search and the home screen. Reading is clients:read; editing is
 	// clients:manage (ADMIN and OPERATOR — day-to-day work); deleting a client is ADMIN-only.
 	if strings.HasPrefix(path, "/api/v1/clients") || path == "/api/v1/search" || path == "/api/v1/home" || path == "/api/v1/recent" {

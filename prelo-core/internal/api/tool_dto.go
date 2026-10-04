@@ -66,6 +66,8 @@ type approvalResponse struct {
 	ExpiresAt   string  `json:"expiresAt"`
 	DecidedAt   *string `json:"decidedAt"`
 	DecidedBy   *string `json:"decidedBy"`
+	// ShortCode (Fase T): what the owner answers on WhatsApp ("SIM K7Q2").
+	ShortCode string `json:"shortCode,omitempty"`
 }
 
 func approvalResponseFrom(a domain.ApprovalRequest) approvalResponse {
@@ -75,6 +77,7 @@ func approvalResponseFrom(a domain.ApprovalRequest) approvalResponse {
 		RequestedAt: a.RequestedAt.Format(time.RFC3339),
 		ExpiresAt:   a.ExpiresAt.Format(time.RFC3339),
 		DecidedBy:   a.DecidedBy,
+		ShortCode:   a.ShortCode,
 	}
 	if a.DecidedAt != nil {
 		d := a.DecidedAt.Format(time.RFC3339)

@@ -85,6 +85,39 @@ func (h *ApprovalHandler) decideRequest(w http.ResponseWriter, r *http.Request, 
 	writeJSON(w, http.StatusOK, approvalResponseFrom(approval))
 }
 
+// DecideByCode is the owner's WhatsApp answer, relayed by prelo-messaging-bridge (Fase T). Only a
+// token with approvals:decide-owner reaches it (the bridge's own), and the bridge only relays
+// answers coming from an owner contact. decidedBy records which number answered.
+func (h *ApprovalHandler) DecideByCode(w http.ResponseWriter, r *http.Request) {
+	var approve bool
+	switch r.PathValue("decision") {
+	case "approve":
+		approve = true
+	case "deny":
+		approve = false
+	default:
+		writeError(w, &domain.ValidationError{Message: "decision must be approve or deny"})
+		return
+	}
+	var req decideApprovalRequest
+	if r.ContentLength != 0 {
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			writeError(w, &domain.ValidationError{Message: "invalid request body"})
+			return
+		}
+	}
+	if req.DecidedBy == "" {
+		writeError(w, &domain.ValidationError{Message: "decidedBy is required"})
+		return
+	}
+	approval, err := h.decide.DecideByCode(r.Context(), r.PathValue("code"), approve, req.DecidedBy)
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, approvalResponseFrom(approval))
+}
+
 func parseApprovalID(r *http.Request) (domain.ApprovalRequestID, error) {
 	raw := r.PathValue("approvalId")
 	id, err := uuid.Parse(raw)
