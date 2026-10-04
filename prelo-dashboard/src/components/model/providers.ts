@@ -18,7 +18,7 @@ export const CLI_PROVIDERS: ModelProvider[] = ["claude_cli", "codex_cli"];
 export const CLI_MODELS: Record<string, { id: string; note: string }[]> = {
   claude_cli: [
     { id: "sonnet", note: "equilíbrio — recomendado" },
-    { id: "haiku", note: "mais rápido, gasta menos cota" },
+    { id: "haiku", note: "mais rápido e barato, mas erra mais ao usar ferramentas" },
     { id: "opus", note: "mais capaz, gasta mais cota" },
   ],
   codex_cli: [{ id: "default", note: "o padrão da sua conta (o primeiro da lista abaixo)" }],

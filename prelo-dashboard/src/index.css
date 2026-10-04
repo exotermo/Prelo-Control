@@ -747,6 +747,10 @@ button.danger:hover:not(:disabled) { background: #a83826; }
 }
 .call-failed { color: var(--danger); }
 
+/* Fase T: approvals answered from WhatsApp. */
+.approval-code { margin-left: 10px; font-size: 13px; vertical-align: middle; }
+.approval-whatsapp { font-size: 13px; margin: 6px 0 10px; }
+
 /* ------------------------------------------------------------------------------------------
    "Folhear a revista" — an off-kilter, cut-and-paste zine. Motion only, plus one decoration
    (the tape strip on clippings). Every entrance animation uses fill-mode `backwards`, so once it

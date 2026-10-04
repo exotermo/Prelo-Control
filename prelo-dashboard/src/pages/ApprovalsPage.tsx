@@ -69,10 +69,15 @@ export function ApprovalsPage() {
         approvals.map((approval) => (
           <div className="approval-card" key={approval.id}>
             <div className="page-header" style={{ marginBottom: 6 }}>
-              <strong>Aprovação pendente</strong>
-              <span className="muted">expira em {new Date(approval.expiresAt).toLocaleTimeString()}</span>
+              <strong>Aprovação pendente {approval.shortCode && <span className="clipping-stamp stamp-wait approval-code">{approval.shortCode}</span>}</strong>
+              <span className="muted">expira às {new Date(approval.expiresAt).toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" })}</span>
             </div>
             <div className="scope">{approval.scope}</div>
+            {approval.shortCode && (
+              <p className="muted approval-whatsapp">
+                Pedido enviado ao WhatsApp do dono — dá para responder lá com <strong>SIM {approval.shortCode}</strong> ou <strong>NÃO {approval.shortCode}</strong>, ou decidir aqui.
+              </p>
+            )}
             <div className="approval-actions">
               <button className="primary" onClick={() => void decide(approval.id, "approve")} disabled={busyId === approval.id}>
                 Aprovar

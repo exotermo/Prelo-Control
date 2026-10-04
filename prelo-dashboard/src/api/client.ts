@@ -213,6 +213,8 @@ export interface ApprovalRequest {
   expiresAt: string;
   decidedAt: string | null;
   decidedBy: string | null;
+  // Fase T: the code the owner answers on WhatsApp ("SIM K7Q2").
+  shortCode?: string;
 }
 
 export function listPendingApprovals(token: string, projectId?: string): Promise<ApprovalRequest[]> {
