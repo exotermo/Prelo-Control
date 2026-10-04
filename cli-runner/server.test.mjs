@@ -1,7 +1,10 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { mkdtemp, mkdir, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import {
-  buildPrompt, claudeArgs, codexArgs, codexPrompt, createServer, limiter, parseClaude, parseCodex,
+  buildPrompt, codexModels, claudeArgs, codexArgs, codexPrompt, createServer, limiter, parseClaude, parseCodex,
   runOnce, RunnerError, systemOf, validateRun,
 } from "./server.mjs";
 
@@ -56,6 +59,8 @@ test("claude output: success, plan limit and logged-out are told apart", () => {
   assert.throws(() => parseClaude(JSON.stringify({ subtype: "success", is_error: true, result: "Invalid API key · Please run /login" }), "", 1),
     (e) => e.code === "auth_required");
   assert.throws(() => parseClaude("not json", "boom", 2), (e) => e.code === "failed");
+  assert.throws(() => parseClaude(JSON.stringify({ subtype: "success", is_error: true, result: "Credit balance is too low" }), "", 0),
+    (e) => e.code === "no_credit" && /assinatura/.test(e.message));
 });
 
 test("codex output: last message, token usage and failures", () => {
@@ -127,4 +132,16 @@ test("HTTP: token required, errors mapped, runs dispatched", async () => {
   } finally {
     server.close();
   }
+});
+
+test("codex models come from the CLI cache: listed only, by priority", async () => {
+  const home = await mkdtemp(join(tmpdir(), "home-"));
+  await mkdir(join(home, ".codex"));
+  await writeFile(join(home, ".codex", "models_cache.json"), JSON.stringify({ models: [
+    { slug: "b", display_name: "B", visibility: "list", priority: 2 },
+    { slug: "hidden", visibility: "hide", priority: 0 },
+    { slug: "a", display_name: "A", visibility: "list", priority: 1, description: "top" },
+  ] }));
+  assert.deepEqual((await codexModels(home)).map((m) => m.id), ["a", "b"]);
+  assert.deepEqual(await codexModels("/nao/existe"), []);
 });

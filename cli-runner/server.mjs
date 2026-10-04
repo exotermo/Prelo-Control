@@ -98,6 +98,10 @@ export function codexPrompt(system, prompt) {
 
 function classify(text) {
   const t = (text ?? "").toLowerCase();
+  if (/credit balance|insufficient.{0,20}(credit|balance)|billing/.test(t)) {
+    // Claude Code logged in with an API (Console) account instead of the Pro/Max subscription.
+    return new RunnerError("no_credit", 402, "o CLI está logado numa conta com cobrança por API, sem crédito — refaça o login escolhendo a sua assinatura (Pro/Max)");
+  }
   if (/usage limit|rate limit|quota|too many requests|limit reached|429/.test(t)) {
     return new RunnerError("rate_limited", 429, "o limite do plano foi atingido — tente mais tarde");
   }
@@ -200,7 +204,9 @@ export async function runOnce(cfg, run, exec = execute) {
         { cwd: workdir, input: codexPrompt(system, prompt), env: childEnv(cfg), timeoutMs });
       let last = null;
       try { last = await readFile(lastFile, "utf8"); } catch { /* no final message */ }
-      result = parseCodex(stdout, stderr, code, last, run.model);
+      // With no -m, Codex runs its default — the account's top-priority model; name it.
+      const resolved = run.model ?? (await codexModels(cfg.home))[0]?.id ?? null;
+      result = parseCodex(stdout, stderr, code, last, resolved);
     }
     return { ...result, engine: run.engine, durationMs: Date.now() - started };
   } finally {
@@ -221,6 +227,22 @@ export function limiter(concurrency) {
   return (task) => new Promise((resolve, reject) => { queue.push({ task, resolve, reject }); next(); });
 }
 
+/**
+ * Models the logged-in Codex account can use, from the CLI's own cache (~/.codex/models_cache.json),
+ * listed ones only, by priority — the first is what Codex runs when no model is given.
+ */
+export async function codexModels(home) {
+  try {
+    const cache = JSON.parse(await readFile(join(home, ".codex", "models_cache.json"), "utf8"));
+    return (cache.models ?? [])
+      .filter((m) => m.visibility === "list" && typeof m.slug === "string")
+      .sort((a, b) => (a.priority ?? 999) - (b.priority ?? 999))
+      .map((m) => ({ id: m.slug, name: m.display_name ?? m.slug, description: (m.description ?? "").slice(0, 160) }));
+  } catch {
+    return [];
+  }
+}
+
 async function exists(path) {
   try { await stat(path); return true; } catch { return false; }
 }
@@ -234,7 +256,7 @@ export async function status(cfg, exec = execute) {
   } catch { codexLogged = false; }
   return {
     claude: { loggedIn: claudeLogged, login: "docker compose exec -it cli-runner claude  (e dentro dele: /login)" },
-    codex: { loggedIn: codexLogged, login: "docker compose exec -it cli-runner codex login --device-auth" },
+    codex: { loggedIn: codexLogged, login: "docker compose exec -it cli-runner codex login --device-auth", models: codexLogged ? await codexModels(cfg.home) : [] },
   };
 }
 

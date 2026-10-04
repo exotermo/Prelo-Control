@@ -3,6 +3,10 @@
 FROM node:24-slim
 ARG CLAUDE_CODE_VERSION=2.1.289
 ARG CODEX_VERSION=0.160.0
+# ca-certificates: node:*-slim ships none, and Codex (a Rust binary) verifies TLS against the
+# system store — without it every HTTPS call fails with "error sending request".
+RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates \
+ && rm -rf /var/lib/apt/lists/*
 RUN npm install -g --omit=dev "@anthropic-ai/claude-code@${CLAUDE_CODE_VERSION}" "@openai/codex@${CODEX_VERSION}" \
  && npm cache clean --force \
  && useradd --create-home --uid 10001 runner
