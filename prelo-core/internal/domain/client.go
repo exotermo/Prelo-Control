@@ -164,12 +164,18 @@ type ClientContact struct {
 func NewClientContact(clientID ClientID, kind ContactKind, raw string, isPrimary bool) (ClientContact, error) {
 	var value string
 	switch kind {
-	case ContactKindPhone, ContactKindWhatsApp:
+	case ContactKindPhone:
 		phone, err := NormalizePhone(raw)
 		if err != nil {
 			return ClientContact{}, err
 		}
 		value = phone
+	case ContactKindWhatsApp:
+		address, err := CanonicalWhatsAppAddress(raw)
+		if err != nil {
+			return ClientContact{}, err
+		}
+		value = address
 	case ContactKindEmail:
 		addr, err := mail.ParseAddress(strings.TrimSpace(raw))
 		if err != nil || addr.Name != "" {
@@ -214,4 +220,48 @@ func NormalizePhone(raw string) (string, error) {
 		return "", &ValidationError{Message: "invalid phone number"}
 	}
 	return phone, nil
+}
+
+var whatsAppID = regexp.MustCompile(`^(\d{6,24})@lid$`)
+
+// CanonicalWhatsAppAddress turns a WhatsApp sender into the value stored on contacts and tasks
+// (Fase C2): a phone JID ("5541…@s.whatsapp.net") or a typed number becomes E.164; a WhatsApp
+// ID ("123…@lid" — what WhatsApp now sends instead of the number for many contacts) is kept as
+// is, since the number behind it is not available to us.
+func CanonicalWhatsAppAddress(raw string) (string, error) {
+	v := strings.ToLower(strings.TrimSpace(raw))
+	if i := strings.Index(v, ":"); i > 0 && strings.Contains(v, "@") {
+		// Device suffix ("5541…:12@s.whatsapp.net") identifies a device, not the contact.
+		v = v[:i] + v[strings.Index(v, "@"):]
+	}
+	if m := whatsAppID.FindStringSubmatch(v); m != nil {
+		return m[1] + "@lid", nil
+	}
+	if strings.HasSuffix(v, "@lid") {
+		return "", &ValidationError{Message: "invalid WhatsApp ID"}
+	}
+	for _, suffix := range []string{"@s.whatsapp.net", "@c.us"} {
+		if strings.HasSuffix(v, suffix) {
+			return NormalizePhone("+" + strings.TrimSuffix(v, suffix))
+		}
+	}
+	return NormalizePhone(v)
+}
+
+// ContactMatchKeys is every stored value that should match this address. Brazilian mobiles
+// exist with and without the extra 9 (older WhatsApp accounts keep the 8-digit form), so both
+// spellings of the same number match each other.
+func ContactMatchKeys(canonical string) []string {
+	keys := []string{canonical}
+	if !strings.HasPrefix(canonical, "+55") {
+		return keys
+	}
+	digits := strings.TrimPrefix(canonical, "+55")
+	switch {
+	case len(digits) == 11 && digits[2] == '9':
+		keys = append(keys, "+55"+digits[:2]+digits[3:])
+	case len(digits) == 10 && digits[2] >= '6':
+		keys = append(keys, "+55"+digits[:2]+"9"+digits[2:])
+	}
+	return keys
 }

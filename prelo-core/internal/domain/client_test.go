@@ -55,3 +55,45 @@ func TestNewClientValidation(t *testing.T) {
 		t.Fatal("unknown status should be rejected")
 	}
 }
+
+func TestCanonicalWhatsAppAddress(t *testing.T) {
+	ok := map[string]string{
+		"26668123456789@lid":              "26668123456789@lid",
+		" 26668123456789@LID ":            "26668123456789@lid",
+		"554184450529@s.whatsapp.net":     "+554184450529",
+		"5541984450529:12@s.whatsapp.net": "+5541984450529",
+		"5541984450529@c.us":              "+5541984450529",
+		"(41) 98445-0529":                 "+5541984450529",
+	}
+	for in, want := range ok {
+		if got, err := CanonicalWhatsAppAddress(in); err != nil || got != want {
+			t.Errorf("CanonicalWhatsAppAddress(%q) = %q, %v; want %q", in, got, err, want)
+		}
+	}
+	for _, in := range []string{"abc@lid", "12@lid", "", "grupo@g.us"} {
+		if got, err := CanonicalWhatsAppAddress(in); err == nil {
+			t.Errorf("CanonicalWhatsAppAddress(%q) = %q, want error", in, got)
+		}
+	}
+}
+
+func TestContactMatchKeysBrazilianNinthDigit(t *testing.T) {
+	cases := map[string][]string{
+		"+5541984450529":     {"+5541984450529", "+554184450529"},
+		"+554184450529":      {"+554184450529", "+5541984450529"},
+		"+554133334444":      {"+554133334444"}, // landline: no 9 variant
+		"+14155550100":       {"+14155550100"},
+		"26668123456789@lid": {"26668123456789@lid"},
+	}
+	for in, want := range cases {
+		got := ContactMatchKeys(in)
+		if len(got) != len(want) {
+			t.Fatalf("ContactMatchKeys(%q) = %v, want %v", in, got, want)
+		}
+		for i := range want {
+			if got[i] != want[i] {
+				t.Errorf("ContactMatchKeys(%q) = %v, want %v", in, got, want)
+			}
+		}
+	}
+}

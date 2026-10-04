@@ -52,7 +52,11 @@ type Task struct {
 	Version      int64
 	ParentTaskID *TaskID
 	Depth        int
-	Source       TaskSource
+	// Fase C2: the client this task is for (inherited from the project, or recognized from the
+	// WhatsApp sender) and that sender's canonical address (see CanonicalWhatsAppAddress).
+	ClientID       *ClientID
+	ContactAddress *string
+	Source         TaskSource
 }
 
 func NewTask(description string, agentID AgentID) (Task, error) {
@@ -98,6 +102,7 @@ func NewSubtask(description string, agentID AgentID, parent Task) (Task, error) 
 	task.Depth = parent.Depth + 1
 	task.TenantID = parent.TenantID
 	task.ProjectID = parent.ProjectID
+	task.ClientID = parent.ClientID
 	task.Source = parent.Source
 	return task, nil
 }
