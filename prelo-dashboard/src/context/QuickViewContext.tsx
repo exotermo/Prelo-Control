@@ -23,9 +23,12 @@ export function QuickViewProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     if (!taskId) return;
-    const onKey = (event: KeyboardEvent) => { if (event.key === "Escape") setTaskId(null); };
+    const close = () => setTaskId(null);
+    const onKey = (event: KeyboardEvent) => { if (event.key === "Escape") close(); };
     window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
+    // Following a link out of the task (e.g. to its client) leaves the overlay behind.
+    window.addEventListener("popstate", close);
+    return () => { window.removeEventListener("keydown", onKey); window.removeEventListener("popstate", close); };
   }, [taskId]);
 
   const value = useMemo(() => ({ openTask }), [openTask]);

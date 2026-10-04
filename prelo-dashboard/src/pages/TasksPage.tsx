@@ -15,6 +15,7 @@ import {
 } from "../api/client";
 import { useAuth } from "../auth/AuthContext";
 import { useProject } from "../context/ProjectContext";
+import { TaskClientBox } from "../components/TaskClientBox";
 import { PipelineTimeline } from "../components/PipelineTimeline";
 
 function statusBadge(status: string) {
@@ -211,6 +212,7 @@ export function TaskDetail({ taskId, onTaskChanged }: { taskId: string; onTaskCh
       </h3>
       <p className="mono muted">{task.id}</p>
       <p>{task.description}</p>
+      <TaskClientBox task={task} onLinked={() => void load()} />
       <button className="primary" onClick={() => void handleExecute()} disabled={!canExecute || executing}>
         {executing ? "Executando…" : canExecute ? "Executar" : "Já executada"}
       </button>

@@ -98,6 +98,9 @@ export interface Task {
   source: "MANUAL" | "MESSAGING";
   // Fase W: the project this task belongs to, or null for the pre-Fase-W "unassigned" bucket.
   projectId: string | null;
+  // Fase C2: the client it is for, and (WhatsApp) who sent it — a phone or a "…@lid" WhatsApp ID.
+  clientId?: string | null;
+  contactAddress?: string | null;
 }
 
 export interface ManualContextItem {
