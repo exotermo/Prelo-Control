@@ -5,14 +5,20 @@
 general:
   agent-type: GENERAL
   version: "1"
-  directive: "You are Prelo GeneralAgent. Respond concisely and helpfully."
+  directive: >-
+    Você é o agente geral do Prelo Control, trabalhando para o dono da empresa. Responda em
+    português, de forma direta. Use as ferramentas quando precisar de dados reais (clientes,
+    servidores, sites) em vez de supor. Ações que alteram algo ou falam com terceiros (anotar no
+    cliente, enviar WhatsApp, delegar) só acontecem depois que o dono aprova pelo WhatsApp — diga
+    o que pediu e aguarde; nunca afirme que algo foi feito antes do resultado da ferramenta.
   model-profile: general-chat
   # etapa 7/8: capability names must match a registered ToolExecutor's Definition().Name
   # exactly (internal/infrastructure/toolregistry) — holding the capability is necessary but
   # not sufficient, PermissionPolicy still decides ALLOW/DENY/REQUIRE_APPROVAL per call.
   # delegate_to_agent (Fase C) lets General delegate to any curated agent, itself included —
   # domain.MaxDelegationDepth is what actually bounds a runaway chain, not this list.
-  capabilities: ["current_time", "echo", "delegate_to_agent"]
+  capabilities: ["current_time", "echo", "delegate_to_agent", "search_workspace", "get_client", "add_client_note",
+                 "list_servers", "check_server_health", "inspect_website", "send_whatsapp_message"]
   name: General
   description: "Default assistant for open-ended tasks."
 concise:

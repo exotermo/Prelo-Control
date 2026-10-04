@@ -19,6 +19,14 @@ func NewStatic(executors ...application.ToolExecutor) *Static {
 	return &Static{tools: m}
 }
 
+// Register adds tools whose dependencies only exist later in startup (e.g. the client and
+// server repositories); still boot-time only, never from request input.
+func (r *Static) Register(executors ...application.ToolExecutor) {
+	for _, executor := range executors {
+		r.tools[executor.Definition().Name] = executor
+	}
+}
+
 func (r *Static) Find(name string) (application.ToolExecutor, bool) {
 	executor, ok := r.tools[name]
 	return executor, ok

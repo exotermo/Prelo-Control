@@ -1,5 +1,7 @@
 package gateway
 
+import "encoding/json"
+
 // Wire types for llm-gateway's provider-neutral chat contract (POST /api/v1/llm/chat). The
 // Gateway itself is Java/Spring and is NOT changing — these field names must match
 // GatewayContracts.java exactly (Jackson serializes record components as-is, camelCase).
@@ -21,11 +23,18 @@ type ChatRequest struct {
 type ToolSpec struct {
 	Name        string `json:"name"`
 	Description string `json:"description"`
+	// InputSchema (Fase T): JSON Schema of the arguments, forwarded to the provider.
+	InputSchema json.RawMessage `json:"inputSchema,omitempty"`
 }
 
+// Message: Fase T adds the provider-neutral tool protocol — an assistant message asking for a
+// tool carries ToolCallID/ToolName/ToolArgsJSON; the result is a "tool" message with the same id.
 type Message struct {
-	Role    string `json:"role"`
-	Content string `json:"content"`
+	Role         string `json:"role"`
+	Content      string `json:"content"`
+	ToolCallID   string `json:"toolCallId,omitempty"`
+	ToolName     string `json:"toolName,omitempty"`
+	ToolArgsJSON string `json:"toolArgsJson,omitempty"`
 }
 
 type Parameters struct {

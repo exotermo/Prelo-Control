@@ -33,7 +33,8 @@ func (DelegateTool) Definition() domain.ToolDefinition {
 			"Args: {\"agentId\": \"<curated agent id>\", \"description\": \"<what the delegate should do>\"}. "+
 			"The result is not available inline — the caller resumes automatically once the delegate finishes.",
 		domain.RiskModerate)
-	return def
+	return def.WithSchema(`{"type":"object","properties":{"agentId":{"type":"string"},"description":{"type":"string"}},"required":["agentId","description"],"additionalProperties":false}`,
+		"Cria uma subtarefa executada por outro agente — consome chamadas ao modelo e pode usar as ferramentas daquele agente.")
 }
 
 type delegateArgs struct {

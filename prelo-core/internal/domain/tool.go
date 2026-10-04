@@ -1,5 +1,7 @@
 package domain
 
+import "encoding/json"
+
 // DelegateToolName identifies the one tool the agent loop treats specially (Fase C): running it
 // doesn't produce a result inline — it creates a child Task and suspends the calling execution
 // until that child finishes (domain.SuspensionSubtask). Both RunAgentLoopUseCase and
@@ -15,6 +17,19 @@ type ToolDefinition struct {
 	Name        string
 	Description string
 	RiskLevel   RiskLevel
+	// InputSchema (Fase T) is the JSON Schema of the arguments — what real models need to call the
+	// tool, and what ValidateToolArgs checks before anything runs. Nil = no arguments.
+	InputSchema json.RawMessage
+	// Impact (Fase T) says, in Portuguese, what the action changes — shown to the owner when the
+	// call needs approval ("grau de impacto").
+	Impact string
+}
+
+// WithSchema returns the definition with its argument schema and impact description.
+func (d ToolDefinition) WithSchema(schema string, impact string) ToolDefinition {
+	d.InputSchema = json.RawMessage(schema)
+	d.Impact = impact
+	return d
 }
 
 func NewToolDefinition(name, description string, riskLevel RiskLevel) (ToolDefinition, error) {

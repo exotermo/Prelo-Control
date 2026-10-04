@@ -16,7 +16,7 @@ func NewCurrentTimeTool() CurrentTimeTool { return CurrentTimeTool{} }
 
 func (CurrentTimeTool) Definition() domain.ToolDefinition {
 	def, _ := domain.NewToolDefinition("current_time", "Returns the current server time (UTC, RFC3339). Read-only, no arguments.", domain.RiskLow)
-	return def
+	return def.WithSchema(`{"type":"object","properties":{},"additionalProperties":false}`, "Nenhum: só lê o relógio do servidor.")
 }
 
 func (CurrentTimeTool) Execute(_ context.Context, _ domain.Execution, _ string) (string, error) {

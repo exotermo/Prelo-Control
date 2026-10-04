@@ -16,7 +16,7 @@ func NewEchoTool() EchoTool { return EchoTool{} }
 
 func (EchoTool) Definition() domain.ToolDefinition {
 	def, _ := domain.NewToolDefinition("echo", "Echoes the given args back. Demo tool for the approval workflow, illustrative MODERATE risk only.", domain.RiskModerate)
-	return def
+	return def.WithSchema(`{"type":"object","properties":{"text":{"type":"string"}}}`, "Nenhum: devolve o texto recebido.")
 }
 
 func (EchoTool) Execute(_ context.Context, _ domain.Execution, argsJSON string) (string, error) {
