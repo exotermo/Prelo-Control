@@ -1,8 +1,8 @@
 # Contrato v1 — Pedidos de ação externa (`action-requests`)
 
-> **Status: CONGELADO (Fase 0), ainda não implementado no Prelo** (PR-3). Lacunas G5–G8 de
-> `docs/CONTRATOS.md`. Quem integra (BastionDeploy) implementa contra este documento e usa um stub até o
-> Prelo publicar. Mudança aqui só por proposta em `docs/integracoes/PROPOSTAS.md`.
+> **Status: IMPLEMENTADO** no PR-3 (2026-10-04; migration 00026). Lacunas G5–G8 de `docs/CONTRATOS.md`.
+> Mudança aqui só por proposta em `docs/integracoes/PROPOSTAS.md`. Diferenças em relação à versão congelada
+> estão marcadas com **(v1.1)**.
 
 ## Por que existe
 
@@ -80,7 +80,12 @@ Corpo: `{kind, projectId, payload, payloadHash, impact, requestedBy, idempotency
 
 ### `GET /api/v1/action-requests/{id}`
 Estado atual (fonte de verdade da decisão). O executor **sempre** consulta antes de executar, mesmo tendo
-recebido o webhook.
+recebido o webhook. Id de outro projeto → `404`.
+
+**(v1.1) Corpo de resposta** (criar, consultar, resultado, listagem):
+`{id, workspaceId, projectId, kind, payload (canônico), payloadHash, risk, impact, requestedBy, idempotencyKey,
+status, approvalId, approvalCode, expiresAt, decidedAt, decidedBy, result: {status, sequence, message, url,
+artifactDigest, reportedAt} | null, createdAt}`. Sessão de pessoa (web/app) nesses endpoints → `403`.
 
 ### `POST /api/v1/action-requests/{id}/result` (escopo `actions:report`)
 ```json
@@ -88,17 +93,26 @@ recebido o webhook.
   "message": "≤ 500, sem segredos", "url": "https://…", "artifactDigest": "sha256:…",
   "reportedAt": "RFC3339", "sequence": 3 }
 ```
-- Só aceito se o pedido está `APPROVED`; `409` caso contrário (executar sem aprovação é erro do executor).
-- Idempotente por `(id, sequence)`; sequência menor que a última é ignorada (`200`, sem efeito).
+- Só aceito se o pedido está `APPROVED`; `409 not_approved` caso contrário (executar sem aprovação é erro do executor).
+- **(v1.1)** O primeiro resultado precisa chegar até `expiresAt + 10 min`; depois disso `409
+  approval_window_closed` (a aprovação envelheceu sem uso — peça de novo).
+- Idempotente por `(id, sequence)`; sequência igual ou menor que a última é ignorada (`200`, sem efeito).
+  `sequence` começa em 1. Resultado final (SUCCEEDED/FAILED/ROLLED_BACK/CANCELLED) também avisa o dono no WhatsApp.
 
 ### `GET /api/v1/projects/{projectId}/actions?kind=deploy&limit=50`
 Leitura para web e Work Control (sessão de dashboard/mobile, `projects:read` + membro do projeto).
 
 ## Webhook `action.decided`
 
-Pelo mecanismo de webhooks do projeto (assinatura `X-Prelo-Signature`). Corpo:
-`{ "event": "action.decided", "actionRequestId", "status": "APPROVED|DENIED|EXPIRED", "payloadHash",
-"decidedAt", "decidedBy" }`. É só um aviso: o executor confirma com `GET` antes de agir.
+Pelo mecanismo de webhooks do projeto (assinatura `X-Prelo-Signature`; o webhook precisa estar inscrito em
+`action.decided`). **(v1.1)** Corpo no envelope padrão de todos os webhooks do Prelo:
+```json
+{ "event": "action.decided", "occurredAt": "RFC3339", "projectId": "uuid",
+  "data": { "actionRequestId": "uuid", "status": "APPROVED|DENIED|EXPIRED", "payloadHash": "sha256:…",
+            "decidedAt": "RFC3339", "decidedBy": "whatsapp:+55…|user:…|system:expired" } }
+```
+É só um aviso: o executor confirma com `GET` antes de agir. Na criação também sai `approval.pending`
+(`data.actionRequestId`, `data.approvalId`).
 
 ## Máquina de estados
 
