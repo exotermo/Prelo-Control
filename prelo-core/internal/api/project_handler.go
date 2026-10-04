@@ -180,7 +180,16 @@ func projectResponseFrom(p domain.Project, memberCount int) projectResponse {
 		ID: p.ID.String(), Name: p.Name, Description: p.Description,
 		CreatedAt: p.CreatedAt.Format(time.RFC3339), CreatedBy: p.CreatedBy,
 		MemberCount: memberCount, DefaultAgentID: p.DefaultAgentID, Instructions: p.Instructions, CoverColor: p.CoverColor,
+		ClientID: clientIDString(p.ClientID),
 	}
+}
+
+func clientIDString(id *domain.ClientID) *string {
+	if id == nil {
+		return nil
+	}
+	s := id.String()
+	return &s
 }
 
 // agentCatalog is the read side of the agent registry the settings screen needs.

@@ -20,6 +20,7 @@ var dashboardOperatorScopes = []string{
 	"tasks:create", "tasks:read", "tasks:execute", "chat:use",
 	"tools:read", "tools:invoke", "approvals:read", "approvals:decide",
 	"observability:read", "servers:read", "projects:read",
+	"clients:read", "clients:manage",
 }
 
 // dashboardAdminScopes adds settings:manage (Integrações/Configurações, Fase G2), users:manage
@@ -27,7 +28,7 @@ var dashboardOperatorScopes = []string{
 // holds SSH credentials, Fase S1), and projects:manage (create/delete projects and manage
 // membership, Fase W — also what lets JWTAuthMiddleware.resolveProject skip the membership
 // check entirely, see auth.go) on top of everything an operator can do — see domain.DashboardRole.
-var dashboardAdminScopes = append(append([]string{}, dashboardOperatorScopes...), "settings:manage", "users:manage", "servers:manage", "projects:manage", "integrations:manage")
+var dashboardAdminScopes = append(append([]string{}, dashboardOperatorScopes...), "settings:manage", "users:manage", "servers:manage", "projects:manage", "integrations:manage", "clients:delete")
 
 func scopesFor(role domain.DashboardRole) []string {
 	if role == domain.DashboardRoleAdmin {

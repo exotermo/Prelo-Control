@@ -344,6 +344,18 @@ func RequestID(ctx context.Context) string {
 }
 
 func requiredScope(method, path string) string {
+	// Fase C1: clients (CRM), search and the home screen. Reading is clients:read; editing is
+	// clients:manage (ADMIN and OPERATOR — day-to-day work); deleting a client is ADMIN-only.
+	if strings.HasPrefix(path, "/api/v1/clients") || path == "/api/v1/search" || path == "/api/v1/home" || path == "/api/v1/recent" {
+		switch {
+		case method == http.MethodGet || path == "/api/v1/recent":
+			return "clients:read"
+		case method == http.MethodDelete && strings.Count(strings.TrimPrefix(path, "/api/v1/clients/"), "/") == 0:
+			return "clients:delete"
+		default:
+			return "clients:manage"
+		}
+	}
 	// Fase I: every integrations route (reading included — the list shows key prefixes and
 	// webhook URLs) is ADMIN-only. An API key never carries this scope, so a key can't mint keys.
 	if strings.HasPrefix(path, "/api/v1/integrations") {

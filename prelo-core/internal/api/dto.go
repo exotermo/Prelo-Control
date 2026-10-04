@@ -90,6 +90,8 @@ type projectResponse struct {
 	DefaultAgentID *string `json:"defaultAgentId"`
 	Instructions   *string `json:"instructions"`
 	CoverColor     string  `json:"coverColor"`
+	// Fase C1: the client this project is for.
+	ClientID *string `json:"clientId"`
 }
 
 type updateProjectRequest struct {

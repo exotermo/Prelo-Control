@@ -211,6 +211,11 @@ func main() {
 		projectHandler := api.NewProjectHandler(projectRepo, projectMemberRepo)
 		api.RegisterProjectRoutes(mux, projectHandler)
 
+		// Fase C1: clients (CRM), search, home (recent + pending) and client timeline.
+		clientRepo := postgres.NewClientRepository(pool)
+		workspace := application.NewWorkspaceService(clientRepo, projectMemberRepo, postgres.NewWorkspaceReadModel(pool))
+		api.RegisterWorkspaceRoutes(mux, api.NewWorkspaceHandler(workspace, clientRepo))
+
 		// Fase PA: project settings (default agent, instructions) feed task creation and context.
 		createTask.SetProjectReader(projectRepo)
 		contextResolver.SetProjectReader(projectRepo)

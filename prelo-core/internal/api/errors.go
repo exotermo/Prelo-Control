@@ -61,6 +61,15 @@ func mapError(err error) (int, string, string) {
 	if errors.Is(err, application.ErrProjectFileNotFound) {
 		return http.StatusNotFound, "file_not_found", "file not found"
 	}
+	if errors.Is(err, application.ErrClientNotFound) {
+		return http.StatusNotFound, "client_not_found", "client not found"
+	}
+	if errors.Is(err, application.ErrContactNotFound) {
+		return http.StatusNotFound, "contact_not_found", "contact not found"
+	}
+	if errors.Is(err, application.ErrContactInUse) {
+		return http.StatusConflict, "contact_in_use", "this phone or e-mail already belongs to another client"
+	}
 	if errors.Is(err, application.ErrProjectNotFound) {
 		return http.StatusNotFound, "project_not_found", "project not found"
 	}
