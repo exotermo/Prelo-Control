@@ -12,7 +12,7 @@ Gateway é OAuth2 Resource Server e requer JWT com issuer, audience, expiração
 
 ## Alternativas
 
-API keys do Hermes e autenticação própria foram descartadas.
+API keys do Prelo e autenticação própria foram descartadas.
 
 ## Consequências
 

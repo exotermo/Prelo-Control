@@ -4,7 +4,7 @@
 
 ## Contexto
 
-Hermes precisa ser executável no `maquiavel` sem introduzir Kubernetes ou operação distribuída.
+Prelo precisa ser executável no `maquiavel` sem introduzir Kubernetes ou operação distribuída.
 
 ## Decisão
 

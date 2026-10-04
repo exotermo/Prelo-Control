@@ -2,7 +2,7 @@
 
 ## Limites atuais
 
-Esta etapa não implementa agentes autônomos. `hermes-app` apenas oferece a porta `LanguageModelGateway`, que será consumida pelo futuro orquestrador e pelos agentes definidos no domínio.
+Esta etapa não implementa agentes autônomos. `legacy-java-app` apenas oferece a porta `LanguageModelGateway`, que será consumida pelo futuro orquestrador e pelos agentes definidos no domínio.
 
 ## Regras para agentes futuros
 

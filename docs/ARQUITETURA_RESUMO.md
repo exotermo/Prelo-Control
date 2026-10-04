@@ -1,18 +1,18 @@
-# Hermes — Resumo de Arquitetura
+# Prelo — Resumo de Arquitetura
 
 > Documento gerado em 2026-09-23 para compartilhamento externo (sócio). Visão de alto nível,
 > não substitui `ARCHITECTURE.md` / `CURRENT_STATE.md` do repositório, que são a fonte de verdade
 > técnica e evoluem mais rápido que este resumo.
 
-## O que é o Hermes
+## O que é o Prelo
 
-Hermes é um agente de IA orientado a tarefas: você cria uma **Task**, o sistema roda uma ou mais
+Prelo é um agente de IA orientado a tarefas: você cria uma **Task**, o sistema roda uma ou mais
 **Execuções** contra um modelo de linguagem, o modelo pode **usar ferramentas** (com um portão de
 permissão no meio) e pode **delegar** partes do trabalho para outros agentes especializados. Tudo
 fica registrado turno a turno, para auditoria e retomada segura em caso de falha.
 
 Separado disso, e conectado a ele, existe um **microsserviço de mensageria** desacoplado que
-permite conversar com o Hermes por WhatsApp (e, por design, outros canais no futuro).
+permite conversar com o Prelo por WhatsApp (e, por design, outros canais no futuro).
 
 ## Visão geral dos componentes
 
@@ -27,37 +27,37 @@ flowchart TB
         Dash1[messager-dashboard<br/>SPA React] <--> Core
     end
 
-    subgraph Bridge["Ponte (repo hermes-messaging-bridge)"]
-        HB[hermes-messaging-bridge<br/>Java]
+    subgraph Bridge["Ponte (repo prelo-messaging-bridge)"]
+        HB[prelo-messaging-bridge<br/>Java]
     end
 
-    subgraph HermesCore["Núcleo do Agente Hermes (este repo)"]
+    subgraph PreloCore["Núcleo do Agente Prelo (este repo)"]
         Gateway[llm-gateway<br/>Java — porta única para LLMs]
-        HermesGo[hermes-app-go<br/>orquestrador de Tasks/Execuções]
-        PG2[(Postgres<br/>hermes)]
-        Dash2[hermes-dashboard<br/>SPA React]
+        PreloCore[prelo-core<br/>orquestrador de Tasks/Execuções]
+        PG2[(Postgres<br/>prelo)]
+        Dash2[prelo-dashboard<br/>SPA React]
     end
 
     LLM[(Provider de LLM<br/>hoje: Mock — Anthropic real ainda não ativado)]
 
     Core -- "callback assinado por mensagem recebida" --> HB
-    HB -- "cria Task/Execução" --> HermesGo
-    HermesGo -- "resposta do agente" --> HB
+    HB -- "cria Task/Execução" --> PreloCore
+    PreloCore -- "resposta do agente" --> HB
     HB -- "envia resposta" --> Core
     Core -- "entrega no WhatsApp" --> Sidecar
 
-    HermesGo <--> PG2
-    HermesGo <--> Gateway
+    PreloCore <--> PG2
+    PreloCore <--> Gateway
     Gateway <--> LLM
-    Dash2 <--> HermesGo
+    Dash2 <--> PreloCore
 ```
 
-## Núcleo do agente Hermes (`hermes-app-go` + `llm-gateway`)
+## Núcleo do agente Prelo (`prelo-core` + `llm-gateway`)
 
 - **`llm-gateway`** (Java): única porta de saída para qualquer provider de LLM. Nenhum outro
   serviço fala diretamente com um provider — isso mantém a troca de modelo/provider isolada num
   único lugar, e evita que chaves de API circulem pelo resto do sistema.
-- **`hermes-app-go`** (Go): o orquestrador. Responsável por:
+- **`prelo-core`** (Go): o orquestrador. Responsável por:
   - **Tasks e Execuções**: uma Task pode gerar várias Execuções (tentativas/retomadas);
   - **Fila durável em Postgres** (`execution_jobs`): claim atômico, lease, reprocessamento seguro
     de jobs órfãos (sem duplicar efeitos colaterais);
@@ -74,7 +74,7 @@ flowchart TB
     interrompida sem repetir efeitos colaterais já concluídos;
   - **Suspensão/retomada genérica**: a execução pausa esperando aprovação humana ou conclusão de
     uma sub-tarefa, e retoma automaticamente quando o evento acontece — nunca por polling.
-- **`hermes-dashboard`** (SPA React/Vite): interface própria para acompanhar Tasks, ver o trace
+- **`prelo-dashboard`** (SPA React/Vite): interface própria para acompanhar Tasks, ver o trace
   turno a turno de uma execução, fila de aprovações pendentes e a árvore de delegação entre
   agentes.
 
@@ -83,25 +83,25 @@ responde de forma simplificada (sem repassar o protocolo de tool-use nativo da A
 loop de ferramentas foi validado contra um provider simulado (`MockProvider`) determinístico.
 Ativar o provider real de ponta a ponta é o próximo passo natural, não uma pendência esquecida.
 
-**Gap conhecido e assumido**: `hermes-app-go` hoje não tem autenticação nenhuma na API (diferente
+**Gap conhecido e assumido**: `prelo-core` hoje não tem autenticação nenhuma na API (diferente
 da mensageria, que tem OAuth2 completo). Funciona bem em ambiente local/controlado; expor além
 disso exige um gate de autenticação mínimo antes.
 
 ## Microsserviço de mensageria (repo `messager-interface`, desacoplado)
 
-Propositalmente um sistema separado — o Hermes não sabe nada sobre WhatsApp, e a mensageria não
-sabe nada sobre agentes de IA. A ponte entre os dois mundos é o `hermes-messaging-bridge`.
+Propositalmente um sistema separado — o Prelo não sabe nada sobre WhatsApp, e a mensageria não
+sabe nada sobre agentes de IA. A ponte entre os dois mundos é o `prelo-messaging-bridge`.
 
 - **`whatsapp-sidecar`**: processo dedicado (Baileys) que mantém a sessão WhatsApp via WebSocket
   e fala com o `messaging-core` por uma rede interna, com token de serviço.
 - **`messaging-core`** (Java/Spring Boot): o núcleo do microsserviço — multi-tenant, contatos,
   allowlist/anti-spam, grupos, canais (WhatsApp hoje, Telegram no desenho), callbacks assinados
-  para sistemas externos (como o `hermes-messaging-bridge`), e todo o sistema de **login humano
+  para sistemas externos (como o `prelo-messaging-bridge`), e todo o sistema de **login humano
   do dashboard** (ver seção abaixo). Dados em Postgres, cache/rate-limit em Redis.
 - **`messager-dashboard`** (SPA React): interface para operar a mensageria — canais, contatos,
   grupos, callbacks — usada pela equipe, não pelos usuários finais do WhatsApp.
-- **`hermes-messaging-bridge`** (Java, repo próprio): recebe o callback de mensagem recebida do
-  `messaging-core`, cria a Task/Execução correspondente no `hermes-app-go`, e devolve a resposta
+- **`prelo-messaging-bridge`** (Java, repo próprio): recebe o callback de mensagem recebida do
+  `messaging-core`, cria a Task/Execução correspondente no `prelo-core`, e devolve a resposta
   do agente para ser entregue de volta no WhatsApp. É a única peça que conhece os dois lados.
 
 ## Login e segurança do dashboard de mensageria
@@ -146,8 +146,8 @@ sequenceDiagram
     participant U as Usuário (WhatsApp)
     participant S as whatsapp-sidecar
     participant C as messaging-core
-    participant B as hermes-messaging-bridge
-    participant H as hermes-app-go
+    participant B as prelo-messaging-bridge
+    participant H as prelo-core
     participant G as llm-gateway
 
     U->>S: mensagem
@@ -191,7 +191,7 @@ confirmados foram fechados:
 5. **Bridge enxuta (só tradução e correlação, sem planejamento/autorização)** — confirmado, sem
    ressalvas; nada mudou aqui.
 
-Hardening aplicado após a versão inicial: a API do `hermes-app-go` exige JWT HS256 com
+Hardening aplicado após a versão inicial: a API do `prelo-core` exige JWT HS256 com
 issuer/audience, tenant e scopes; callbacks do bridge usam contrato v2 com timestamp,
 `X-Webhook-Id` persistido e tolerância de cinco minutos; e a execução de ferramentas possui
 limites de argumentos, resultado, concorrência e timeout. Ainda não há sandbox de sistema
@@ -204,8 +204,8 @@ operacional para ferramentas nativas (shell/filesystem), que continuam fora do c
 | Núcleo do agente (loop de ferramentas, delegação, ledger, retomada) | Implementado e testado |
 | Timeout de execução de ferramenta | Implementado e testado (Fase F) |
 | Provider real de LLM (Anthropic) | Contrato pronto, ativação de tool-use nativo pendente (decisão consciente) |
-| Autenticação do `hermes-app-go` (API do agente) | Implementada — JWT HS256, issuer/audience, tenant e scopes; configuração fail-closed |
-| Dashboard próprio do Hermes (`hermes-dashboard`) | Implementado |
+| Autenticação do `prelo-core` (API do agente) | Implementada — JWT HS256, issuer/audience, tenant e scopes; configuração fail-closed |
+| Dashboard próprio do Prelo (`prelo-dashboard`) | Implementado |
 | Mensageria (WhatsApp, allowlist, callbacks) | Implementado e testado em produção local (round-trip real) |
 | Idempotência de mensagem + outbox de resposta no bridge | Implementado (Fase F) |
 | Autorização por remetente (dono vs. cliente) | Implementado (Fase F) |

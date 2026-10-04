@@ -1,21 +1,21 @@
 # Database
 
-PostgreSQL é a única persistência da topologia inicial e não publica porta no host. Os serviços usam a rede `hermes_internal`; somente Hermes e Gateway possuem credenciais de banco em runtime.
+PostgreSQL é a única persistência da topologia inicial e não publica porta no host. Os serviços usam a rede `prelo_internal`; somente Prelo e Gateway possuem credenciais de banco em runtime.
 
 | Tabela | Dono lógico | Conteúdo | Não armazena |
 |---|---|---|---|
-| `hermes_llm_executions` | Hermes | request/task/agent IDs, modelo, provider, duração e status do passthrough `/hermes/chat` | prompt, resposta, JWT ou segredo |
+| `llm_executions` | Prelo | request/task/agent IDs, modelo, provider, duração e status do passthrough `/chat` | prompt, resposta, JWT ou segredo |
 | `gateway_audit_events` | LLM Gateway | evento de segurança/uso e correlação | chaves de provider, JWT e conteúdo LLM |
 
-`hermes_llm_executions` é legado do V1 mas segue ativo: é a tabela de auditoria do endpoint passthrough `POST /hermes/chat`, escrita tanto por `hermes` (Java) quanto por `hermes-go` (mesmo formato).
+`llm_executions` é legado do V1 mas segue ativo: é a tabela de auditoria do endpoint passthrough `POST /chat`, escrita tanto por `prelo` (Java) quanto por `prelo-core` (mesmo formato).
 
 Cada serviço controla suas migrações em uma tabela de histórico distinta, preservando autonomia sem introduzir outro banco. O volume `postgres_data` conserva dados entre `down` e `up`; removê-lo é uma operação destrutiva e intencional.
 
-## Migrações do núcleo (schema `hermes_app`)
+## Migrações do núcleo (schema `prelo_app`)
 
-`hermes` (Java) usa Flyway, histórico em `hermes_app.hermes_flyway_schema_history`, migrações V1–V6: `tasks`, `task_executions`, `task_manual_context_items`, `context_snapshots`, `context_snapshot_items` (ver ADR-002/003 para o modelo de domínio por trás).
+`prelo` (Java) usa Flyway, histórico em `prelo_app.legacy_flyway_schema_history`, migrações V1–V6: `tasks`, `task_executions`, `task_manual_context_items`, `context_snapshots`, `context_snapshot_items` (ver ADR-002/003 para o modelo de domínio por trás).
 
-`hermes-go` (Go, ADR-012) usa `goose`, histórico em `hermes_app.hermes_go_schema_history` — uma tabela própria, deliberadamente separada da do Flyway para nunca colidir, embora ambos os serviços leiam/escrevam o mesmo schema `hermes_app`. As migrações do Go continuam a numeração a partir de V7.
+`prelo-core` (Go, ADR-012) usa `goose`, histórico em `prelo_app.prelo_core_schema_history` — uma tabela própria, deliberadamente separada da do Flyway para nunca colidir, embora ambos os serviços leiam/escrevam o mesmo schema `prelo_app`. As migrações do Go continuam a numeração a partir de V7.
 
 ### `execution_jobs` (V7, goose — etapa 6.5/ADR-013)
 

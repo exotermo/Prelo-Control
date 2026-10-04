@@ -1,4 +1,4 @@
-**HERMES**
+**PRELO**
 
 **Documento Técnico de Arquitetura**
 
@@ -8,7 +8,7 @@
 |:--------------------------|:-----------|:--------------------------------------------------------------------------------|:-------------|
 | **Versão**                 | **Data**   | **Descrição**                                                                   | **Autor**    |
 | 1.0                         | 2026-09-24 | Elaboração do documento: núcleo do agente, mensageria desacoplada e Fase F (hardening do pipeline mensagem→tarefa→resposta). | Claude (assistente técnico) |
-| 1.1                         | 2026-09-25 | Reorganização em dois repositórios (`hermes` e `messager`); Seção 6.2 atualizada para o contrato de callback v2 (replay); rede de integração movida para um override do lado consumidor. | Claude (assistente técnico) |
+| 1.1                         | 2026-09-25 | Reorganização em dois repositórios (`prelo` e `messager`); Seção 6.2 atualizada para o contrato de callback v2 (replay); rede de integração movida para um override do lado consumidor. | Claude (assistente técnico) |
 
 ---
 
@@ -17,7 +17,7 @@
 1. [Introdução](#1-introdução)
 2. [Identificação do Projeto](#2-identificação-do-projeto)
 3. [Visão Geral da Arquitetura](#3-visão-geral-da-arquitetura)
-4. [Núcleo do Agente Hermes](#4-núcleo-do-agente-hermes)
+4. [Núcleo do Agente Prelo](#4-núcleo-do-agente-prelo)
    4.1. [Modelo de domínio: Task, Execution, ExecutionTurn](#41-modelo-de-domínio-task-execution-executionturn)
    4.2. [Gateway único de LLM](#42-gateway-único-de-llm)
    4.3. [Loop automático de uso de ferramentas](#43-loop-automático-de-uso-de-ferramentas)
@@ -34,7 +34,7 @@
    5.4. [Fila de envio e idempotência](#54-fila-de-envio-e-idempotência)
    5.5. [Callbacks assinados](#55-callbacks-assinados)
    5.6. [Autenticação humana do dashboard](#56-autenticação-humana-do-dashboard)
-6. [Ponte de Integração (hermes-messaging-bridge)](#6-ponte-de-integração-hermes-messaging-bridge)
+6. [Ponte de Integração (prelo-messaging-bridge)](#6-ponte-de-integração-prelo-messaging-bridge)
    6.1. [Responsabilidade única](#61-responsabilidade-única)
    6.2. [Verificação de assinatura](#62-verificação-de-assinatura)
    6.3. [Idempotência de mensagem e persistência antes do ack](#63-idempotência-de-mensagem-e-persistência-antes-do-ack)
@@ -51,10 +51,10 @@
 ## 1. Introdução
 
 Este documento descreve, de forma técnica e precisa, a arquitetura implementada até a presente
-data (versão 1.0) para o agente Hermes e para o microsserviço de mensageria que o alimenta. O
+data (versão 1.0) para o agente Prelo e para o microsserviço de mensageria que o alimenta. O
 documento cobre exclusivamente o que está **implementado e testado** no código-fonte dos
-repositórios `hermes-app-go`, `llm-gateway`, `messager-interface/messaging-core`,
-`hermes-messaging-bridge`, `hermes-dashboard` e `messager-dashboard` — decisões planejadas mas
+repositórios `prelo-core`, `llm-gateway`, `messager-interface/messaging-core`,
+`prelo-messaging-bridge`, `prelo-dashboard` e `messager-dashboard` — decisões planejadas mas
 não implementadas são explicitamente marcadas como tal na Seção 8.
 
 O documento segue a estrutura de controle de versão e revisão do Processo de Gerenciamento de
@@ -65,9 +65,9 @@ adaptado para um artefato de arquitetura técnica de software.
 
 | Campo | Valor |
 |---|---|
-| **Projeto** | HERMES — Agente de IA orientado a tarefas, com mensageria desacoplada |
-| **Repositórios** | **`hermes`** (produto do agente): `llm-gateway/`, `hermes-app-go/`, `hermes-app/` (legado, referência), `hermes-dashboard/`, `integrations/messaging-bridge/` (adaptador do lado consumidor), `docs/`. **`messager`** (produto de mensageria, independente e sem referência ao Hermes): `messaging-core/`, `whatsapp-sidecar/`, `dashboard/`. A única ligação entre os dois é a ponte e o override de rede `integrations/messaging-bridge/compose.messager-link.yaml`. |
-| **Linguagens** | Go 1.x (`hermes-app-go`), Java 21 / Spring Boot 3.4 (`llm-gateway`, `messaging-core`, `hermes-messaging-bridge`), TypeScript/React (`hermes-dashboard`, `messager-dashboard`) |
+| **Projeto** | PRELO — Agente de IA orientado a tarefas, com mensageria desacoplada |
+| **Repositórios** | **`prelo`** (produto do agente): `llm-gateway/`, `prelo-core/`, `legacy-java-app/` (legado, referência), `prelo-dashboard/`, `integrations/messaging-bridge/` (adaptador do lado consumidor), `docs/`. **`messager`** (produto de mensageria, independente e sem referência ao Prelo): `messaging-core/`, `whatsapp-sidecar/`, `dashboard/`. A única ligação entre os dois é a ponte e o override de rede `integrations/messaging-bridge/compose.messager-link.yaml`. |
+| **Linguagens** | Go 1.x (`prelo-core`), Java 21 / Spring Boot 3.4 (`llm-gateway`, `messaging-core`, `prelo-messaging-bridge`), TypeScript/React (`prelo-dashboard`, `messager-dashboard`) |
 | **Persistência** | PostgreSQL 17 (um schema/banco por serviço), Redis (cache/rate-limit) |
 | **Provider de LLM em uso** | `MockProvider` determinístico (Fases A–F validadas contra ele); `AnthropicProvider` implementado para resposta simples, sem repasse de `tool_use` nativo (ver Seção 8) |
 
@@ -75,11 +75,11 @@ adaptado para um artefato de arquitetura técnica de software.
 
 Dois sistemas desacoplados, integrados por uma ponte de tradução:
 
-- **Núcleo do agente** (`hermes-app-go` + `llm-gateway`): dono de Tasks, Execuções, ferramentas,
+- **Núcleo do agente** (`prelo-core` + `llm-gateway`): dono de Tasks, Execuções, ferramentas,
   aprovações e delegação. Não conhece WhatsApp nem qualquer canal de mensageria.
 - **Microsserviço de mensageria** (`messaging-core` + `whatsapp-sidecar`): dono de canais,
   contatos, conversas e entrega de mensagens. Não conhece agentes de IA, tarefas nem LLMs.
-- **Ponte** (`hermes-messaging-bridge`): único componente que conhece os dois lados. Traduz
+- **Ponte** (`prelo-messaging-bridge`): único componente que conhece os dois lados. Traduz
   eventos e correlaciona respostas; deliberadamente não planeja, não guarda histórico de
   negócio e não decide autorização de ferramentas (Seção 6.1).
 
@@ -88,11 +88,11 @@ outro. Toda integração é por contrato HTTP (REST) explícito.
 
 ```mermaid
 flowchart TB
-    subgraph NUCLEO["Núcleo do Agente Hermes"]
+    subgraph NUCLEO["Núcleo do Agente Prelo"]
         GATEWAY["llm-gateway<br/>(porta única para LLMs)"]
-        HERMESGO["hermes-app-go<br/>(Tasks, Execuções, ferramentas, aprovação, delegação)"]
-        PGHERMES[("PostgreSQL<br/>schema hermes_app")]
-        HDASH["hermes-dashboard<br/>(SPA)"]
+        PRELOCORE["prelo-core<br/>(Tasks, Execuções, ferramentas, aprovação, delegação)"]
+        PGPRELO[("PostgreSQL<br/>schema prelo_app")]
+        HDASH["prelo-dashboard<br/>(SPA)"]
     end
 
     subgraph MENSAGERIA["Microsserviço de Mensageria (desacoplado)"]
@@ -103,7 +103,7 @@ flowchart TB
         MDASH["messager-dashboard<br/>(SPA)"]
     end
 
-    BRIDGE["hermes-messaging-bridge<br/>(tradução e correlação)"]
+    BRIDGE["prelo-messaging-bridge<br/>(tradução e correlação)"]
     LLM[("Provider de LLM<br/>(Mock hoje; Anthropic parcial)")]
     WA["WhatsApp"]
 
@@ -113,14 +113,14 @@ flowchart TB
     CORE <--> REDIS
     MDASH <--> CORE
     CORE <-- "callback assinado / API REST" --> BRIDGE
-    BRIDGE <-- "API REST (Tasks/Execuções)" --> HERMESGO
-    HERMESGO <--> PGHERMES
-    HERMESGO <--> GATEWAY
+    BRIDGE <-- "API REST (Tasks/Execuções)" --> PRELOCORE
+    PRELOCORE <--> PGPRELO
+    PRELOCORE <--> GATEWAY
     GATEWAY <--> LLM
-    HDASH <--> HERMESGO
+    HDASH <--> PRELOCORE
 ```
 
-## 4. Núcleo do Agente Hermes
+## 4. Núcleo do Agente Prelo
 
 ### 4.1. Modelo de domínio: Task, Execution, ExecutionTurn
 
@@ -139,7 +139,7 @@ flowchart TB
 
 O `llm-gateway` (Java) é a única porta de saída para qualquer provider de modelo de linguagem.
 Nenhum outro serviço do ecossistema mantém credencial de provider. O contrato
-`hermes-app-go` ↔ `llm-gateway` inclui:
+`prelo-core` ↔ `llm-gateway` inclui:
 
 - `ChatRequest.Tools []ToolSpec` — ferramentas oferecidas ao modelo nesta chamada.
 - `ChatResponse.Kind` — `FINAL` ou `TOOL_USE`; em `TOOL_USE`, `ToolName`/`ArgsJSON`/`ToolUseID`
@@ -244,7 +244,7 @@ A posse de uma *capability* é necessária, mas não suficiente: `PermissionPoli
 
 `messaging-core` (Java/Spring Boot) é multi-tenant desde a base: toda leitura/escrita é
 filtrada por `TenantId`, autenticação via OAuth2 `client_credentials`. Não possui nenhuma
-dependência do domínio do Hermes (Tasks, Execuções, agentes).
+dependência do domínio do Prelo (Tasks, Execuções, agentes).
 
 ### 5.2. Canais e adaptadores
 
@@ -283,13 +283,13 @@ repouso com AES), 8 códigos de recuperação de uso único, sessão via cookie 
 `SameSite=Lax` de *refresh* + token de acesso de 15 minutos, *rate limit* de tentativas de login e
 bloqueio de conta após 5 falhas.
 
-## 6. Ponte de Integração (hermes-messaging-bridge)
+## 6. Ponte de Integração (prelo-messaging-bridge)
 
 ### 6.1. Responsabilidade única
 
-`hermes-messaging-bridge` traduz eventos de mensagem em Tasks/Execuções do Hermes e correlaciona
+`prelo-messaging-bridge` traduz eventos de mensagem em Tasks/Execuções do Prelo e correlaciona
 a resposta de volta. Não guarda histórico de negócio, não planeja e não decide autorização de
-ferramentas — essa autoridade permanece inteiramente em `hermes-app-go` (Seção 4.4). Se a ponte
+ferramentas — essa autoridade permanece inteiramente em `prelo-core` (Seção 4.4). Se a ponte
 passasse a decidir quais tarefas executar, o sistema passaria a ter dois orquestradores
 concorrentes — decisão de design explicitamente evitada.
 
@@ -342,7 +342,7 @@ Sequência completa de uma mensagem recebida até a resposta entregue, já refle
 flowchart TB
     U["Usuário (WhatsApp)"] --> S["whatsapp-sidecar"]
     S --> C["messaging-core<br/>valida allowlist/anti-spam"]
-    C -- "callback assinado (HMAC)" --> W["WebhookController<br/>(hermes-messaging-bridge)"]
+    C -- "callback assinado (HMAC)" --> W["WebhookController<br/>(prelo-messaging-bridge)"]
     W --> V{"Assinatura válida?"}
     V -- não --> REJ["401 — corpo descartado"]
     V -- sim --> DUP{"messageId já em<br/>inbound_events?"}
@@ -351,7 +351,7 @@ flowchart TB
     PERSIST --> ROUTE{"from em<br/>ownerContacts?"}
     ROUTE -- sim --> AGGEN["agentId = general"]
     ROUTE -- não --> AGCUST["agentId = customer"]
-    AGGEN --> TASK["Cria Task + Execução<br/>(hermes-app-go)"]
+    AGGEN --> TASK["Cria Task + Execução<br/>(prelo-core)"]
     AGCUST --> TASK
     TASK --> LOOP["Loop de ferramentas<br/>(Seção 4.3)"]
     LOOP --> RESULT["Execução COMPLETED"]
@@ -369,7 +369,7 @@ flowchart TB
 | Item | Status | Observação |
 |---|---|---|
 | Provider real Anthropic com `tool_use` nativo | **Não implementado** | Decisão consciente de escopo; contrato Go↔Gateway já preparado |
-| Autenticação da API do `hermes-app-go` | **Implementado nesta rodada** | JWT Bearer com issuer/audience/exp/tenant/token_use/scopes; modo sem auth somente loopback explícito |
+| Autenticação da API do `prelo-core` | **Implementado nesta rodada** | JWT Bearer com issuer/audience/exp/tenant/token_use/scopes; modo sem auth somente loopback explícito |
 | Proteção a *replay* da assinatura HMAC do callback | **Implementado no bridge para contract v2** | Timestamp com tolerância de 5 min, `X-Webhook-Id` persistido com chave única; v1 somente por flag de migração |
 | Limite de CPU/memória/filesystem por ferramenta | **Limites de aplicação implementados** | Timeout, argumentos, resposta e concorrência; sandbox OS para futuras ferramentas externas continua pendente |
 | Cobertura de testes automatizados da autenticação humana do dashboard | **Cobertura de fluxo existente** | `DashboardHumanAuthIT`, `UserManagementIT`, testes TOTP/cifra e E2E cobrem os fluxos principais; revisar/expandir casos negativos de CSRF e headers antes de exposição pública |
@@ -387,13 +387,13 @@ de reentrega ou retentativa.
 
 - ADR-004 — Portão de permissão (`PermissionPolicy`) e princípio de que um agente não decide sua
   própria autorização.
-- ADR-012 — Reescrita do `hermes-app` para `hermes-app-go`.
+- ADR-012 — Reescrita do `legacy-java-app` para `prelo-core`.
 - ADR-013 — Fila durável (`execution_jobs`) e broker assíncrono.
 - ADR-014 — Loop de ferramentas e delegação entre agentes.
 - `AGENTS.md` (raiz do repositório) — regras vigentes para agentes futuros.
-- Código-fonte verificado nesta versão: `hermes-app-go/internal/application/invoke_tool.go`,
-  `hermes-app-go/internal/domain/approval_request.go`,
-  `hermes-messaging-bridge/src/main/java/dev/hermes/bridge/**`,
+- Código-fonte verificado nesta versão: `prelo-core/internal/application/invoke_tool.go`,
+  `prelo-core/internal/domain/approval_request.go`,
+  `prelo-messaging-bridge/src/main/java/dev/prelo/bridge/**`,
   `messager-interface/messaging-core/src/main/java/io/messager/core/**`.
 
 ## 11. Aprovações

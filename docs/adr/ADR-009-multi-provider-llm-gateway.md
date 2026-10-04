@@ -12,7 +12,7 @@ Gateway separado possui `LLMProvider`, `ModelRouter` e contrato `/api/v1/llm/cha
 
 ## Alternativas
 
-Chamar Anthropic/OpenAI diretamente pelo Hermes foi descartado.
+Chamar Anthropic/OpenAI diretamente pelo Prelo foi descartado.
 
 ## Consequências
 

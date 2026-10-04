@@ -8,10 +8,10 @@ Execuções de task bloqueavam a requisição HTTP (`POST /tasks/{id}/execute` s
 
 ## Decisão
 
-- **Postgres é a fonte de verdade durável.** Nova tabela `hermes_app.execution_jobs` (migration goose V7), 1:1 com `task_executions` via `execution_id` único. Estados: `PENDING, CLAIMED, RUNNING, DONE, FAILED, RETRY, DEAD`.
+- **Postgres é a fonte de verdade durável.** Nova tabela `prelo_app.execution_jobs` (migration goose V7), 1:1 com `task_executions` via `execution_id` único. Estados: `PENDING, CLAIMED, RUNNING, DONE, FAILED, RETRY, DEAD`.
 - **`execution_jobs.id == task_executions.id == Execution.id`**, e esse mesmo UUID é o `requestId`/`X-Request-Id` enviado ao `llm-gateway` — chave de idempotência única em toda a pipeline.
 - **Claim atômico, não lock otimista clássico.** Diferente de `Task`/`Execution` (que usam `UPDATE ... WHERE version=$1`, replicando o padrão exato do Java), o claim de job usa `UPDATE execution_jobs SET status='CLAIMED' ... WHERE id=$1 AND status IN ('PENDING','RETRY')` — não há um valor de versão pré-lido pelo chamador para comparar, então a corrida é resolvida inteiramente pelo lock de linha do Postgres durante o UPDATE.
-- **Redis é só despacho, nunca durabilidade.** Um Redis Stream (`hermes:execution-jobs`, grupo `hermes-workers`) recebe um `XADD` best-effort após o commit da transação Postgres. Workers fazem `XReadGroup`, mas nunca confiam no payload da mensagem — sempre releem o job do Postgres e tentam o claim atômico; `XAck` acontece logo após a leitura, porque o papel do Redis aqui é "avisar", não "seguar trabalho". Se o Redis cair, for resetado, ou uma mensagem se perder antes de ser lida, nenhum job se perde: o sweeper descobre pelo Postgres sozinho.
+- **Redis é só despacho, nunca durabilidade.** Um Redis Stream (`prelo:execution-jobs`, grupo `prelo-workers`) recebe um `XADD` best-effort após o commit da transação Postgres. Workers fazem `XReadGroup`, mas nunca confiam no payload da mensagem — sempre releem o job do Postgres e tentam o claim atômico; `XAck` acontece logo após a leitura, porque o papel do Redis aqui é "avisar", não "seguar trabalho". Se o Redis cair, for resetado, ou uma mensagem se perder antes de ser lida, nenhum job se perde: o sweeper descobre pelo Postgres sozinho.
 - **Sweeper independente do Redis** (`internal/infrastructure/worker/sweeper.go`), rodando a cada poucos segundos: (1) move jobs `CLAIMED`/`RUNNING` com `lease_expires_at` vencido para `RETRY` (com backoff) ou `DEAD` (se `max_attempts` esgotado); (2) processa diretamente qualquer job `PENDING`/`RETRY` já disponível. Isso cobre tanto a recuperação após restart quanto o fallback caso o Redis esteja totalmente ausente — o mesmo código atende os dois casos.
 - **Idempotência end-to-end**: antes de chamar o Gateway, o worker relê a `Execution`; se já `COMPLETED`/`FAILED`, encerra sem rechamar o Gateway. Isso cobre o caso de crash entre "Gateway respondeu" e "job marcado DONE". `lease_expires_at` fica folgado (2 minutos) acima do timeout do Gateway (10s, ADR sobre o Gateway), garantindo que qualquer retry só aconteça depois que a tentativa anterior já teria expirado de qualquer forma.
 - **Contrato HTTP**: `POST /tasks/{id}/execute` retorna `202 Accepted` imediatamente com `{executionId, taskId, status}`; a orquestração real acontece no worker. `GET /tasks/{id}/executions/{executionId}` expõe o estado corrente (`PENDING/RUNNING/COMPLETED/FAILED`, resultado, erro, timestamps) para polling.
@@ -30,8 +30,8 @@ Execuções de task bloqueavam a requisição HTTP (`POST /tasks/{id}/execute` s
 
 ## Implicações de segurança
 
-Redis roda só na rede `hermes_internal` (ADR-008), sem porta publicada e sem egress. Nenhum dado sensível (prompt, resposta, segredo) trafega pelo Redis — só o UUID do job.
+Redis roda só na rede `prelo_internal` (ADR-008), sem porta publicada e sem egress. Nenhum dado sensível (prompt, resposta, segredo) trafega pelo Redis — só o UUID do job.
 
 ## Evolução futura
 
-Cutover de `compose.yaml` e remoção de `hermes-app/` (Java) só após checklist de paridade (ver `CURRENT_STATE.md`), com confirmação explícita do usuário.
+Cutover de `compose.yaml` e remoção de `legacy-java-app/` (Java) só após checklist de paridade (ver `CURRENT_STATE.md`), com confirmação explícita do usuário.

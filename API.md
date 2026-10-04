@@ -1,14 +1,14 @@
 # API
 
-`hermes-go` (Go, `127.0.0.1:8082`, execução assíncrona per ADR-013) é o serviço de produção desde o cutover de 2026-09-23 (ver `CURRENT_STATE.md`). `hermes` (Java, síncrono) foi parqueado — código intacto em `hermes-app/`, fora do `docker compose up` padrão — e é citado abaixo só onde seu contrato histórico diverge do de `hermes-go`, para quem precisar comparar.
+`prelo-core` (Go, `127.0.0.1:8082`, execução assíncrona per ADR-013) é o serviço de produção desde o cutover de 2026-09-23 (ver `CURRENT_STATE.md`). `prelo` (Java, síncrono) foi parqueado — código intacto em `legacy-java-app/`, fora do `docker compose up` padrão — e é citado abaixo só onde seu contrato histórico diverge do de `prelo-core`, para quem precisar comparar.
 
-Desde o hardening, todas as rotas `/api/v1/**` do hermes-go exigem `Authorization: Bearer` com
+Desde o hardening, todas as rotas `/api/v1/**` do prelo-core exigem `Authorization: Bearer` com
 JWT emitido pelo messaging-core. O token deve conter `iss`, `aud`, `exp`, `tenant_id`,
-`token_use` e o scope da operação; o segredo de entrada (`HERMES_GO_API_JWT_SECRET`) é
+`token_use` e o scope da operação; o segredo de entrada (`PRELO_API_JWT_SECRET`) é
 separado do segredo usado para chamar o llm-gateway. O healthcheck continua público. O modo
 sem autenticação só é permitido explicitamente em loopback.
 
-## Hermes — `POST /api/v1/tasks`
+## Prelo — `POST /api/v1/tasks`
 
 Cria uma task. `201 Created` com `{id, description, status, agentId}`.
 
@@ -18,9 +18,9 @@ Cria uma task. `201 Created` com `{id, description, status, agentId}`.
 
 `agentId` é opcional (default `general`). `context` é opcional, limitado a 20 itens; a soma de `description` + conteúdo dos itens não pode ultrapassar 24000 caracteres.
 
-## Hermes — `POST /api/v1/tasks/{taskId}/execute`
+## Prelo — `POST /api/v1/tasks/{taskId}/execute`
 
-**`hermes-go`**: assíncrono (etapa 6.5/ADR-013). Retorna `202 Accepted` imediatamente:
+**`prelo-core`**: assíncrono (etapa 6.5/ADR-013). Retorna `202 Accepted` imediatamente:
 
 ```json
 {"executionId":"...","taskId":"...","agentId":"general","status":"PENDING","result":null,"error":null}
@@ -28,9 +28,9 @@ Cria uma task. `201 Created` com `{id, description, status, agentId}`.
 
 A orquestração real (resolver agente, montar contexto, chamar o Gateway) acontece depois, em um worker consumindo a fila persistida. Use `GET /api/v1/tasks/{taskId}/executions/{executionId}` para acompanhar o resultado.
 
-**`hermes` (Java)**: síncrono — a mesma chamada bloqueia até a execução terminar e retorna `200` com o resultado final já preenchido (`result`/`error`).
+**`prelo` (Java)**: síncrono — a mesma chamada bloqueia até a execução terminar e retorna `200` com o resultado final já preenchido (`result`/`error`).
 
-## Hermes — `GET /api/v1/tasks/{taskId}/executions/{executionId}` (etapa 6.5, só em `hermes-go`)
+## Prelo — `GET /api/v1/tasks/{taskId}/executions/{executionId}` (etapa 6.5, só em `prelo-core`)
 
 Consulta o estado de uma execution enfileirada:
 
@@ -40,19 +40,19 @@ Consulta o estado de uma execution enfileirada:
 
 `status` é um de `PENDING, RUNNING, COMPLETED, FAILED`. `404 execution_not_found` se o id não existir ou não pertencer à `taskId` informada.
 
-## Hermes — `GET /api/v1/tasks/{taskId}`
+## Prelo — `GET /api/v1/tasks/{taskId}`
 
 `200` com `{id, description, status, agentId}`, `404 task_not_found` se não existir.
 
-## Hermes — `POST /api/v1/hermes/chat`
+## Prelo — `POST /api/v1/chat`
 
-Passthrough direto ao Gateway, sem passar por Task/Execution. Encaminha uma solicitação abstrata ao Gateway e persiste somente metadados de execução (auditoria em `hermes_llm_executions`).
+Passthrough direto ao Gateway, sem passar por Task/Execution. Encaminha uma solicitação abstrata ao Gateway e persiste somente metadados de execução (auditoria em `llm_executions`).
 
 ```json
-{"model":"mock-echo","messages":[{"role":"user","content":"Olá Hermes"}],"parameters":{"temperature":0.2,"maxTokens":128},"taskId":"task-1","agentId":"general"}
+{"model":"mock-echo","messages":[{"role":"user","content":"Olá Prelo"}],"parameters":{"temperature":0.2,"maxTokens":128},"taskId":"task-1","agentId":"general"}
 ```
 
-## Hermes — Ferramentas e aprovação (etapa 7/8, ADR-004, só `hermes-go`)
+## Prelo — Ferramentas e aprovação (etapa 7/8, ADR-004, só `prelo-core`)
 
 `GET /api/v1/tools` — `200` com `[{name, description, riskLevel}]`, o catálogo curado (`RiskLevel`: `LOW`/`MODERATE`/`HIGH`).
 
@@ -62,14 +62,14 @@ Passthrough direto ao Gateway, sem passar por Task/Execution. Encaminha uma soli
 
 ## Erros
 
-Corpo `{code, message}` para os erros mapeados: `invalid_task_transition` (409), `invalid_approval_transition` (409, só `hermes-go`), `concurrent_modification` (409), `unknown_agent` (400), `task_not_found` (404), `execution_not_found` (404, só `hermes-go`), `tool_not_found` (404, só `hermes-go`), `gateway_failure` (502), `validation_error` (400, só `hermes-go`).
+Corpo `{code, message}` para os erros mapeados: `invalid_task_transition` (409), `invalid_approval_transition` (409, só `prelo-core`), `concurrent_modification` (409), `unknown_agent` (400), `task_not_found` (404), `execution_not_found` (404, só `prelo-core`), `tool_not_found` (404, só `prelo-core`), `gateway_failure` (502), `validation_error` (400, só `prelo-core`).
 
 | Método/rota | Scope |
 |---|---|
 | `POST /api/v1/tasks` | `tasks:create` |
 | `GET /api/v1/tasks/**` | `tasks:read` |
 | `POST /api/v1/tasks/{id}/execute` | `tasks:execute` |
-| `POST /api/v1/hermes/chat` | `chat:use` |
+| `POST /api/v1/chat` | `chat:use` |
 | `GET /api/v1/tools` / `POST .../invoke` | `tools:read` / `tools:invoke` |
 | `/api/v1/approvals/**` | `approvals:read` / `approvals:decide` |
 | observabilidade | `observability:read` |

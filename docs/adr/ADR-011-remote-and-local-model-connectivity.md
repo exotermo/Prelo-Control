@@ -12,7 +12,7 @@ Somente o Gateway terá egress e futuros adaptadores devem usar endpoints explic
 
 ## Alternativas
 
-Executar modelos dentro do Hermes ou conceder rede ampla ao host foram descartados.
+Executar modelos dentro do Prelo ou conceder rede ampla ao host foram descartados.
 
 ## Consequências
 

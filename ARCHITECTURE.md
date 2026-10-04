@@ -1,4 +1,4 @@
-# Hermes Agent — Arquitetura proposta
+# Prelo Agent — Arquitetura proposta
 
 ## 1. Estado encontrado (discovery)
 
@@ -8,7 +8,7 @@ Antes de iniciar a implementação, ainda será necessária uma decisão explíc
 
 ## 2. Visão e limites da V1
 
-Hermes é o orquestrador: recebe uma intenção, constrói uma tarefa, resolve contexto e diretivas, escolhe agentes, aplica permissões, acompanha a execução e consolida um resultado auditável. Ele não concentra a lógica de todos os domínios nem executa ações de risco sem aprovação.
+Prelo é o orquestrador: recebe uma intenção, constrói uma tarefa, resolve contexto e diretivas, escolhe agentes, aplica permissões, acompanha a execução e consolida um resultado auditável. Ele não concentra a lógica de todos os domínios nem executa ações de risco sem aprovação.
 
 A V1 valida o núcleo com conversa, tarefa, contexto, diretivas, um agente básico, ferramentas inicialmente somente de leitura, aprovação e rastreabilidade. Research, oportunidade, agenda, educação, finanças, economia, ExoDeploy e homelab entram como módulos posteriores atrás das mesmas portas do núcleo.
 
@@ -191,15 +191,15 @@ Não há base para decidir ainda a plataforma de UI, linguagem, biblioteca de pe
 
 ## 17. Core Domain implementado
 
-O primeiro vertical slice implementa `Task → Context → Directive → GeneralAgent → HermesOrchestrator → LlmClient → Result`. As entidades em `domain` são Java puro; os casos de uso e portas estão em `application`; JPA/PostgreSQL e o adapter do contrato HTTP do Gateway estão em `infrastructure`. O Gateway permanece um serviço independente e não conhece Task, Agent ou orquestração do Hermes.
+O primeiro vertical slice implementa `Task → Context → Directive → GeneralAgent → PreloOrchestrator → LlmClient → Result`. As entidades em `domain` são Java puro; os casos de uso e portas estão em `application`; JPA/PostgreSQL e o adapter do contrato HTTP do Gateway estão em `infrastructure`. O Gateway permanece um serviço independente e não conhece Task, Agent ou orquestração do Prelo.
 
-## 18. Reescrita de hermes-app em Go (ADR-012) e execução assíncrona (ADR-013)
+## 18. Reescrita de legacy-java-app em Go (ADR-012) e execução assíncrona (ADR-013)
 
-`hermes-app` foi reescrito em Go (`hermes-app-go/`) e é o serviço de produção desde o cutover de 2026-09-23 (ver `CURRENT_STATE.md`); o módulo Java original está parqueado, código intacto, fora do `docker compose up` padrão. A mesma separação de camadas se aplica, com nomes de pacote Go: `internal/domain` (tipos puros, sem dependências), `internal/application` (casos de uso + portas como interfaces), `internal/infrastructure/{persistence,gateway,agentregistry,queue,worker,toolregistry,tools}` (implementações), `internal/api` (handlers HTTP). `llm-gateway` continua Java/Spring, inalterado.
+`legacy-java-app` foi reescrito em Go (`prelo-core/`) e é o serviço de produção desde o cutover de 2026-09-23 (ver `CURRENT_STATE.md`); o módulo Java original está parqueado, código intacto, fora do `docker compose up` padrão. A mesma separação de camadas se aplica, com nomes de pacote Go: `internal/domain` (tipos puros, sem dependências), `internal/application` (casos de uso + portas como interfaces), `internal/infrastructure/{persistence,gateway,agentregistry,queue,worker,toolregistry,tools}` (implementações), `internal/api` (handlers HTTP). `llm-gateway` continua Java/Spring, inalterado.
 
 ### 18.1 ToolRegistry, PermissionPolicy e aprovação (etapas 7/8, ADR-004)
 
-Só existe em `hermes-go` (nunca foi portado pro Java parqueado). `application.ToolRegistry` é um catálogo curado, boot-only, de `application.ToolExecutor` (par definição+código, mesma separação que `AgentRegistry`/`AgentDefinition`). Toda invocação passa por `application.PermissionPolicy.Evaluate`, que só decide `ALLOW`/`DENY`/`REQUIRE_APPROVAL` — nunca executa nada. `InvokeToolUseCase` grava um `domain.ToolCall` (auditoria) antes de qualquer execução, mesmo quando a decisão é `DENY`. Um `REQUIRE_APPROVAL` cria um `domain.ApprovalRequest` (ação+escopo+expiração, ADR-004) e não roda nada até `DecideApprovalUseCase.Approve` — que é o único caminho que efetivamente executa uma ferramenta de risco moderado/alto, e faz isso no mesmo passo em que registra o "sim" humano.
+Só existe em `prelo-core` (nunca foi portado pro Java parqueado). `application.ToolRegistry` é um catálogo curado, boot-only, de `application.ToolExecutor` (par definição+código, mesma separação que `AgentRegistry`/`AgentDefinition`). Toda invocação passa por `application.PermissionPolicy.Evaluate`, que só decide `ALLOW`/`DENY`/`REQUIRE_APPROVAL` — nunca executa nada. `InvokeToolUseCase` grava um `domain.ToolCall` (auditoria) antes de qualquer execução, mesmo quando a decisão é `DENY`. Um `REQUIRE_APPROVAL` cria um `domain.ApprovalRequest` (ação+escopo+expiração, ADR-004) e não roda nada até `DecideApprovalUseCase.Approve` — que é o único caminho que efetivamente executa uma ferramenta de risco moderado/alto, e faz isso no mesmo passo em que registra o "sim" humano.
 
 A etapa 6.5 (execução assíncrona) acrescenta dois componentes novos ao fluxo de execução:
 

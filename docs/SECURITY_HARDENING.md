@@ -1,8 +1,8 @@
-# Hermes — hardening implementado
+# Prelo — hardening implementado
 
 Este documento registra o estado executável da rodada posterior à arquitetura técnica.
 
-## API do hermes-app-go
+## API do prelo-core
 
 As rotas `/api/v1/**` exigem JWT Bearer por padrão. O token precisa conter assinatura HS256
 (com segredo separado do segredo usado para chamar o llm-gateway), `iss`, `aud`, `exp`,
@@ -10,8 +10,8 @@ As rotas `/api/v1/**` exigem JWT Bearer por padrão. O token precisa conter assi
 allowlist explícita; issuer, audience, validade temporal e scopes são verificados antes de o
 handler ser chamado.
 
-O modo sem autenticação só é permitido com `HERMES_GO_ALLOW_INSECURE_LOCAL_ONLY=true` e
-`HERMES_GO_BIND_HOST=127.0.0.1` (ou loopback equivalente). O processo falha no startup se esse
+O modo sem autenticação só é permitido com `PRELO_ALLOW_INSECURE_LOCAL_ONLY=true` e
+`PRELO_BIND_HOST=127.0.0.1` (ou loopback equivalente). O processo falha no startup se esse
 modo for solicitado em endereço não-loopback.
 
 Scopes atualmente aplicados:

@@ -6,7 +6,7 @@
 
 As etapas 7/8 (ADR-004) deram um *gate* de permissão e um registro de auditoria por chamada de
 ferramenta — mas só via invocação explícita por API, nunca acionado pelo próprio LLM durante uma
-execução. O Hermes precisava de três coisas, pedidas juntas por exigirem a mesma base:
+execução. O Prelo precisava de três coisas, pedidas juntas por exigirem a mesma base:
 
 1. **Loop de tool-calling automático** — o LLM decide chamar uma ferramenta durante a execução.
 2. **Orquestrador multi-agente** — um agente delega trabalho a outro.
@@ -36,7 +36,7 @@ A ativação do provider real de LLM ficou deliberadamente fora de escopo — to
   explícita (`status IN ('CLAIMED','RUNNING')`), não uma exclusão; não foi necessário nenhum
   código novo no sweeper para essa garantia, só um teste que trava a invariante
   (`TestSweeper_NeverTouchesAnAwaitingResumeJob`).
-- **Contrato Gateway ganha `tools`/`TOOL_USE`** (cross-repo, `llm-gateway` + `hermes-go`):
+- **Contrato Gateway ganha `tools`/`TOOL_USE`** (cross-repo, `llm-gateway` + `prelo-core`):
   `LLMRequest.tools` (nome+descrição, sem JSON schema de args — deliberadamente mínimo) e
   `LLMResponse.kind` (`FINAL`|`TOOL_USE`, com `content` ou `toolName`/`toolArgsJson` conforme o
   caso). `MockProvider.java` fica determinístico: oferece a primeira tool se ainda não viu um
@@ -109,5 +109,5 @@ um operador aprove delegações repetidamente. Nenhum dado sensível novo entra 
 O contrato Gateway já está pronto para tool-calling estruturado real; falta só o
 `AnthropicProvider.java` passar `tools`/`tool_use`/`tool_result` no formato que a API da
 Anthropic exige, quando o provider real for ligado (fora de escopo desta ADR). A UI própria do
-Hermes (consumindo os dois endpoints novos de observabilidade) é a próxima fase, num repositório
-separado (`hermes-dashboard`), ainda não iniciada.
+Prelo (consumindo os dois endpoints novos de observabilidade) é a próxima fase, num repositório
+separado (`prelo-dashboard`), ainda não iniciada.
