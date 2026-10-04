@@ -43,6 +43,8 @@ func main() {
 	// JWTAuthMiddleware is only constructed after that, since resolveProject needs both.
 	var projectRepo *postgres.ProjectRepository
 	var projectMemberRepo *postgres.ProjectMemberRepository
+	// PR-2: app sessions, also needed by JWTAuthMiddleware to refuse revoked app tokens.
+	var mobileSessionsForAuth *postgres.MobileSessionRepository
 	// Fase I: stays a nil interface (not a typed nil pointer) unless integrations are configured,
 	// so the middleware cleanly rejects every "prl_" bearer in that case.
 	var apiKeyAuth api.ApiKeyAuthenticator
@@ -216,7 +218,15 @@ func main() {
 		projectHandler := api.NewProjectHandler(projectRepo, projectMemberRepo)
 		api.RegisterProjectRoutes(mux, projectHandler)
 		// PR-1 (contratos G1/G3): who am I + the instance's workspace.
-		api.RegisterMeRoutes(mux, api.NewMeHandler(dashboardUsers, projectRepo, projectMemberRepo, postgres.NewWorkspaceRepository(pool)))
+		meHandler := api.NewMeHandler(dashboardUsers, projectRepo, projectMemberRepo, postgres.NewWorkspaceRepository(pool))
+		api.RegisterMeRoutes(mux, meHandler)
+		// PR-2 (contratos G2/G9): Work Control app sessions, device-bound and revocable.
+		mobileSessions := postgres.NewMobileSessionRepository(pool)
+		dashboardAuthService.SetMobileSessions(mobileSessions)
+		meHandler.SetMobileSessions(mobileSessions)
+		api.RegisterMobileSessionRoutes(mux, api.NewMobileSessionHandler(dashboardAuthService, mobileSessions))
+		approvalHandler.SetStepUp(application.NewStepUpPolicy(approvalRepo, toolCallRepo, mobileSessions, dashboardAuthService))
+		mobileSessionsForAuth = mobileSessions
 
 		// Fase C1: clients (CRM), search, home (recent + pending) and client timeline.
 		clientRepo := postgres.NewClientRepository(pool)
@@ -307,6 +317,17 @@ func main() {
 			}
 			sender := webhook.NewSender(deliveryRepo, webhookRepo, integrationsCipher, webhook.NewHTTPClient(cfg.Integrations.AllowPrivateTargets), 3*time.Second, 20)
 			go sender.Run(ctx)
+
+			// PR-3 (contratos G5–G8): external systems (BastionDeploy) ask the owner to authorize an
+			// exact action with a project integration key; the decision goes back by webhook + GET.
+			actionService := application.NewActionRequestService(postgres.NewActionRequestRepository(pool), postgres.NewWorkspaceRepository(pool))
+			var actionOwner *application.OwnerApprovalNotifier
+			if bridgeClient.Configured() {
+				actionOwner = application.NewOwnerApprovalNotifier(approvalRepo, toolCallRepo, toolRegistry, bridgeClient)
+			}
+			actionService.SetNotifications(actionOwner, dispatcher)
+			decideApproval.SetActionListener(actionService)
+			api.RegisterActionRequestRoutes(mux, api.NewActionRequestHandler(actionService, projectRepo, projectMemberRepo))
 		}
 	} else {
 		log.Print("PRELO_DB_HOST not set, skipping migrations and API wiring")
@@ -318,6 +339,9 @@ func main() {
 		authMiddleware, err = api.NewJWTAuthMiddleware(cfg.APIAuth, projectRepo, projectMemberRepo, apiKeyAuth)
 		if err != nil {
 			log.Fatalf("invalid API authentication configuration: %v", err)
+		}
+		if mobileSessionsForAuth != nil {
+			authMiddleware.SetMobileSessions(mobileSessionsForAuth)
 		}
 	}
 

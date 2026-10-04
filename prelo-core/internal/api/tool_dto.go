@@ -55,6 +55,8 @@ func toolCallResponseFrom(c domain.ToolCall) toolCallResponse {
 
 type decideApprovalRequest struct {
 	DecidedBy string `json:"decidedBy"`
+	// TotpCode (PR-2, G9): needed to approve a HIGH-risk action from the app.
+	TotpCode string `json:"totpCode"`
 }
 
 type approvalResponse struct {
@@ -68,6 +70,8 @@ type approvalResponse struct {
 	DecidedBy   *string `json:"decidedBy"`
 	// ShortCode (Fase T): what the owner answers on WhatsApp ("SIM K7Q2").
 	ShortCode string `json:"shortCode,omitempty"`
+	// ActionRequestID (PR-3): set when this approval is for an external action (then toolCallId is empty).
+	ActionRequestID *string `json:"actionRequestId,omitempty"`
 }
 
 func approvalResponseFrom(a domain.ApprovalRequest) approvalResponse {
@@ -78,6 +82,11 @@ func approvalResponseFrom(a domain.ApprovalRequest) approvalResponse {
 		ExpiresAt:   a.ExpiresAt.Format(time.RFC3339),
 		DecidedBy:   a.DecidedBy,
 		ShortCode:   a.ShortCode,
+	}
+	if a.IsAction() {
+		resp.ToolCallID = ""
+		id := a.ActionRequestID.String()
+		resp.ActionRequestID = &id
 	}
 	if a.DecidedAt != nil {
 		d := a.DecidedAt.Format(time.RFC3339)

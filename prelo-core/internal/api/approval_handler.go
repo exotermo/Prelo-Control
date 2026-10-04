@@ -14,7 +14,15 @@ import (
 type ApprovalHandler struct {
 	decide    *application.DecideApprovalUseCase
 	approvals application.ApprovalRepository
+	stepUp    stepUpChecker
 }
+
+type stepUpChecker interface {
+	CheckApprove(ctx context.Context, sessionID uuid.UUID, userID domain.DashboardUserID, approvalID domain.ApprovalRequestID, totpCode string) error
+}
+
+// SetStepUp enables G9: HIGH-risk approvals from an app session need a fresh TOTP.
+func (h *ApprovalHandler) SetStepUp(stepUp stepUpChecker) { h.stepUp = stepUp }
 
 func NewApprovalHandler(decide *application.DecideApprovalUseCase, approvals application.ApprovalRepository) *ApprovalHandler {
 	return &ApprovalHandler{decide: decide, approvals: approvals}
@@ -51,14 +59,14 @@ func (h *ApprovalHandler) Get(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *ApprovalHandler) Approve(w http.ResponseWriter, r *http.Request) {
-	h.decideRequest(w, r, h.decide.Approve)
+	h.decideRequest(w, r, h.decide.Approve, true)
 }
 
 func (h *ApprovalHandler) Deny(w http.ResponseWriter, r *http.Request) {
-	h.decideRequest(w, r, h.decide.Deny)
+	h.decideRequest(w, r, h.decide.Deny, false)
 }
 
-func (h *ApprovalHandler) decideRequest(w http.ResponseWriter, r *http.Request, decide func(ctx context.Context, id domain.ApprovalRequestID, decidedBy string) (domain.ApprovalRequest, error)) {
+func (h *ApprovalHandler) decideRequest(w http.ResponseWriter, r *http.Request, decide func(ctx context.Context, id domain.ApprovalRequestID, decidedBy string) (domain.ApprovalRequest, error), approving bool) {
 	id, err := parseApprovalID(r)
 	if err != nil {
 		writeError(w, err)
@@ -75,6 +83,18 @@ func (h *ApprovalHandler) decideRequest(w http.ResponseWriter, r *http.Request, 
 	decidedBy := req.DecidedBy
 	if decidedBy == "" {
 		decidedBy = "unknown"
+	}
+	if identity, ok := FromContext(r.Context()); ok && approving && identity.SessionID != "" {
+		if h.stepUp == nil {
+			writeError(w, application.ErrStepUpRequired)
+			return
+		}
+		sessionID, _ := uuid.Parse(identity.SessionID)
+		userID, _ := uuid.Parse(identity.Subject)
+		if err := h.stepUp.CheckApprove(r.Context(), sessionID, domain.DashboardUserID{Value: userID}, id, req.TotpCode); err != nil {
+			writeError(w, err)
+			return
+		}
 	}
 
 	approval, err := decide(r.Context(), id, decidedBy)
