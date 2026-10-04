@@ -101,6 +101,8 @@ func RegisterModelConnectionRoutes(mux *http.ServeMux, h *ModelConnectionHandler
 	mux.HandleFunc("PUT /api/v1/model-connections/instance", h.SaveInstance)
 	mux.HandleFunc("POST /api/v1/model-connections/instance/retest", h.RetestInstance)
 	mux.HandleFunc("DELETE /api/v1/model-connections/instance", h.DeleteInstance)
+	mux.HandleFunc("PUT /api/v1/model-connections/instance/active", h.SetInstanceActive)
+	mux.HandleFunc("GET /api/v1/model-connections/cli-status", h.CliStatus)
 	mux.HandleFunc("POST /api/v1/model-connections/test", h.Test)
 	mux.HandleFunc("GET /api/v1/model-connections/usage", h.InstanceUsage)
 	mux.HandleFunc("GET /api/v1/projects/{projectId}/model", h.GetProject)

@@ -142,7 +142,9 @@ func (uc *RunAgentLoopUseCase) Run(ctx context.Context, task domain.Task, agent 
 			ModelProfile: agent.ModelProfile,
 			Messages:     messages,
 			Tools:        toolSpecs,
-			Metadata:     map[string]string{"taskId": task.ID.String(), "agentId": agent.AgentID.String()},
+			// origin (Fase X): llm-gateway only lets a subscription CLI connection answer work a
+			// human started (MANUAL) — WhatsApp conversations always go to the API connection.
+			Metadata: map[string]string{"taskId": task.ID.String(), "agentId": agent.AgentID.String(), "origin": string(task.Source)},
 		}
 		if task.ProjectID != nil {
 			chatReq.ProjectID = task.ProjectID.String()

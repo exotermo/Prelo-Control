@@ -52,7 +52,7 @@ func (h *ChatHandler) Chat(w http.ResponseWriter, r *http.Request) {
 		ModelProfile: req.Model,
 		Messages:     messages,
 		Parameters:   parameters,
-		Metadata:     map[string]string{"taskId": req.TaskID, "agentId": req.AgentID},
+		Metadata:     map[string]string{"taskId": req.TaskID, "agentId": req.AgentID, "origin": string(domain.TaskSourceManual)},
 	}
 
 	resp, err := h.service.Chat(r.Context(), gwReq, requestID, req.TaskID, req.AgentID)

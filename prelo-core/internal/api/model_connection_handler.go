@@ -71,6 +71,16 @@ func (h *ModelConnectionHandler) RetestInstance(w http.ResponseWriter, r *http.R
 func (h *ModelConnectionHandler) DeleteInstance(w http.ResponseWriter, r *http.Request) {
 	h.relay(w, r, http.MethodDelete, "/instance", false)
 }
+// SetInstanceActive switches the instance default on/off (Fase X): off means work without a
+// project connection falls back to the gateway's static profiles instead of failing.
+func (h *ModelConnectionHandler) SetInstanceActive(w http.ResponseWriter, r *http.Request) {
+	h.relay(w, r, http.MethodPut, "/instance/active", true)
+}
+
+// CliStatus tells whether the subscription CLIs (Claude Code / Codex) are logged in (Fase X).
+func (h *ModelConnectionHandler) CliStatus(w http.ResponseWriter, r *http.Request) {
+	h.relay(w, r, http.MethodGet, "/cli-status", false)
+}
 func (h *ModelConnectionHandler) Test(w http.ResponseWriter, r *http.Request) {
 	h.relay(w, r, http.MethodPost, "/test", true)
 }
