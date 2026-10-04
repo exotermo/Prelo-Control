@@ -24,6 +24,9 @@ public class ProviderConnection {
     private Boolean lastTestOk;
     private Long lastTestLatencyMs;
     private String lastTestError;
+    private java.time.Instant lastCallAt;
+    private Boolean lastCallOk;
+    private String lastCallError;
     private Instant createdAt;
     private Instant updatedAt;
     @Version private long version;
@@ -90,4 +93,7 @@ public class ProviderConnection {
     public Long lastTestLatencyMs() { return lastTestLatencyMs; }
     public String lastTestError() { return lastTestError; }
     public Instant updatedAt() { return updatedAt; }
+    public Instant lastCallAt() { return lastCallAt; }
+    public Boolean lastCallOk() { return lastCallOk; }
+    public String lastCallError() { return lastCallError; }
 }

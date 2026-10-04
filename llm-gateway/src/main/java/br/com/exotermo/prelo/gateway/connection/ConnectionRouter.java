@@ -12,9 +12,15 @@ import java.util.function.Function;
  * The provider key is decrypted only inside {@code call}, for the duration of one request.
  */
 public interface ConnectionRouter {
-    Optional<RoutedConnection> route(UUID projectId);
+    /**
+     * origin (Fase X) is who started the work: a subscription CLI connection only serves "MANUAL"
+     * (the owner's own tasks); anything else — WhatsApp, prospecting — skips it.
+     */
+    Optional<RoutedConnection> route(UUID projectId, String origin);
+
+    default Optional<RoutedConnection> route(UUID projectId) { return route(projectId, null); }
 
     record RoutedConnection(String provider, String model, String scope, Function<LLMRequest, LLMResponse> call) { }
 
-    ConnectionRouter NONE = projectId -> Optional.empty();
+    ConnectionRouter NONE = (projectId, origin) -> Optional.empty();
 }

@@ -1,0 +1,99 @@
+package br.com.exotermo.prelo.gateway.connection;
+
+import br.com.exotermo.prelo.gateway.llm.LLMRequest;
+import br.com.exotermo.prelo.gateway.llm.LLMResponse;
+import br.com.exotermo.prelo.gateway.provider.*;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ArrayNode;
+import com.fasterxml.jackson.databind.node.ObjectNode;
+import java.io.IOException;
+import java.net.URI;
+import java.net.http.HttpClient;
+import java.net.http.HttpRequest;
+import java.net.http.HttpResponse;
+import java.net.http.HttpTimeoutException;
+import java.time.Duration;
+import java.util.List;
+import java.util.UUID;
+
+/**
+ * Fase X: talks to cli-runner, which runs the owner's Claude Code / Codex CLIs (Pro plans) as a
+ * text-only model. No provider key ever passes through here — the CLIs hold their own logins.
+ */
+class CliRunnerClient {
+    record EngineStatus(boolean loggedIn, String loginCommand) { }
+
+    private final HttpClient http;
+    private final ObjectMapper json;
+    private final String baseUrl;
+    private final String token;
+
+    CliRunnerClient(ObjectMapper json, String baseUrl, String token) {
+        this.http = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(5)).followRedirects(HttpClient.Redirect.NEVER).build();
+        this.json = json;
+        this.baseUrl = baseUrl;
+        this.token = token;
+    }
+
+    boolean configured() { return baseUrl != null && !baseUrl.isBlank() && token != null && token.length() >= 32; }
+
+    static String engineOf(String provider) {
+        return ProviderUrlPolicy.CLAUDE_CLI.equals(provider) ? "claude" : "codex";
+    }
+
+    EngineStatus status(String provider) {
+        JsonNode body = send(HttpRequest.newBuilder(URI.create(baseUrl + "/v1/status")).timeout(Duration.ofSeconds(20)).GET(), provider);
+        JsonNode engine = body.path(engineOf(provider));
+        return new EngineStatus(engine.path("loggedIn").asBoolean(false), engine.path("login").asText(""));
+    }
+
+    LLMResponse chat(String provider, String model, LLMRequest request, Duration timeout) {
+        ObjectNode payload = json.createObjectNode();
+        payload.put("engine", engineOf(provider));
+        if (model != null && !model.isBlank()) payload.put("model", model);
+        payload.put("timeoutMs", timeout.toMillis());
+        ArrayNode messages = payload.putArray("messages");
+        request.messages().forEach(m -> messages.addObject().put("role", m.role()).put("content", m.content()));
+        HttpRequest.Builder builder;
+        try {
+            builder = HttpRequest.newBuilder(URI.create(baseUrl + "/v1/run"))
+                .timeout(timeout.plusSeconds(15)).header("content-type", "application/json")
+                .POST(HttpRequest.BodyPublishers.ofString(json.writeValueAsString(payload)));
+        } catch (IOException exception) {
+            throw new ProviderRejectedRequestException("failed to build cli-runner request");
+        }
+        JsonNode body = send(builder, provider);
+        int input = body.path("inputTokens").asInt(0);
+        int output = body.path("outputTokens").asInt(0);
+        return new LLMResponse(UUID.randomUUID(), provider, body.path("model").asText(model), LLMResponse.KIND_FINAL,
+            body.path("text").asText(""), null, null, null, new LLMResponse.Usage(input, output, input + output),
+            body.path("durationMs").asLong(0), null, List.of());
+    }
+
+    private JsonNode send(HttpRequest.Builder builder, String provider) {
+        HttpResponse<String> response;
+        try {
+            response = http.send(builder.header("Authorization", "Bearer " + token).build(), HttpResponse.BodyHandlers.ofString());
+        } catch (HttpTimeoutException exception) {
+            throw new ProviderTimeoutException(provider + " did not answer in time");
+        } catch (IOException | InterruptedException exception) {
+            if (exception instanceof InterruptedException) Thread.currentThread().interrupt();
+            throw new ProviderUnavailableException("cli-runner is unreachable");
+        }
+        int status = response.statusCode();
+        if (status == 401) {
+            // Either the runner token is wrong (ops error) or the CLI itself is logged out.
+            throw new ProviderAuthenticationException(provider + " is not logged in");
+        }
+        if (status == 429) throw new ProviderQuotaExceededException(provider + " plan limit reached");
+        if (status == 504) throw new ProviderTimeoutException(provider + " did not answer in time");
+        if (status >= 500) throw new ProviderUnavailableException(provider + " failed (" + status + ")");
+        if (status < 200 || status >= 300) throw new ProviderRejectedRequestException(provider + " rejected the request (" + status + ")");
+        try {
+            return json.readTree(response.body());
+        } catch (IOException exception) {
+            throw new ProviderUnavailableException("cli-runner returned an unparsable response");
+        }
+    }
+}

@@ -15,15 +15,23 @@ final class ProviderUrlPolicy {
     static final String ANTHROPIC = "anthropic";
     static final String OPENAI = "openai";
     static final String OPENAI_COMPATIBLE = "openai_compatible";
+    // Fase X: the owner's subscription CLIs, run by cli-runner — no key, no user-supplied URL.
+    static final String CLAUDE_CLI = "claude_cli";
+    static final String CODEX_CLI = "codex_cli";
+    static final String CLI_RUNNER_URL = "cli-runner";
 
     private ProviderUrlPolicy() { }
 
     static boolean knownProvider(String provider) {
-        return ANTHROPIC.equals(provider) || OPENAI.equals(provider) || OPENAI_COMPATIBLE.equals(provider);
+        return ANTHROPIC.equals(provider) || OPENAI.equals(provider) || OPENAI_COMPATIBLE.equals(provider) || isCli(provider);
+    }
+
+    static boolean isCli(String provider) {
+        return CLAUDE_CLI.equals(provider) || CODEX_CLI.equals(provider);
     }
 
     static boolean requiresKey(String provider) {
-        return !OPENAI_COMPATIBLE.equals(provider);
+        return !OPENAI_COMPATIBLE.equals(provider) && !isCli(provider);
     }
 
     /** Returns the base URL to store/use: fixed for the two first-party providers. */
@@ -32,6 +40,7 @@ final class ProviderUrlPolicy {
             case ANTHROPIC -> "https://api.anthropic.com";
             case OPENAI -> "https://api.openai.com/v1";
             case OPENAI_COMPATIBLE -> validateCustom(requested, allowPrivate);
+            case CLAUDE_CLI, CODEX_CLI -> CLI_RUNNER_URL;
             default -> throw new ConnectionValidationException("provedor desconhecido");
         };
     }

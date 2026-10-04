@@ -2,6 +2,7 @@ package br.com.exotermo.prelo.gateway.connection;
 
 import java.time.Duration;
 import org.springframework.boot.context.properties.ConfigurationProperties;
+import org.springframework.boot.context.properties.bind.ConstructorBinding;
 import org.springframework.boot.context.properties.bind.DefaultValue;
 
 /**
@@ -18,11 +19,24 @@ public record ConnectionProperties(
         @DefaultValue("false") boolean allowPrivateUrls,
         @DefaultValue("60s") Duration chatTimeout,
         @DefaultValue("10s") Duration testTimeout,
-        @DefaultValue("1024") int maxTokens) {
+        @DefaultValue("1024") int maxTokens,
+        // Fase X: cli-runner (subscription CLIs). Empty URL/token = CLI connections unavailable.
+        @DefaultValue("") String cliRunnerUrl,
+        @DefaultValue("") String cliRunnerToken,
+        @DefaultValue("180s") Duration cliTimeout) {
+
+    // Two constructors: tell Spring which one binds the properties (the canonical one).
+    @ConstructorBinding
+    public ConnectionProperties { }
+
+    public ConnectionProperties(String masterKeyFile, boolean allowPrivateUrls, Duration chatTimeout, Duration testTimeout, int maxTokens) {
+        this(masterKeyFile, allowPrivateUrls, chatTimeout, testTimeout, maxTokens, "", "", Duration.ofSeconds(180));
+    }
 
     @Override
     public String toString() {
         return "ConnectionProperties{masterKeyFile=[redacted], allowPrivateUrls=" + allowPrivateUrls + ", chatTimeout=" + chatTimeout
-            + ", testTimeout=" + testTimeout + ", maxTokens=" + maxTokens + "}";
+            + ", testTimeout=" + testTimeout + ", maxTokens=" + maxTokens + ", cliRunnerUrl=" + cliRunnerUrl
+            + ", cliRunnerToken=[redacted], cliTimeout=" + cliTimeout + "}";
     }
 }

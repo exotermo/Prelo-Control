@@ -45,7 +45,8 @@ public class ChatOrchestrationService {
 
     public LLMResponse execute(LLMRequest request, String requestId, String subject, String clientId) {
         UUID projectId = request.projectUuid();
-        Optional<ConnectionRouter.RoutedConnection> routed = connections.route(projectId);
+        String origin = request.metadata() == null ? null : request.metadata().get("origin");
+        Optional<ConnectionRouter.RoutedConnection> routed = connections.route(projectId, origin);
         if (routed.isPresent()) return executeConnection(routed.get(), request, requestId, subject, clientId, projectId);
         String profile = request.modelProfile();
         List<ProviderCandidate> candidates = plans.resolve(profile);

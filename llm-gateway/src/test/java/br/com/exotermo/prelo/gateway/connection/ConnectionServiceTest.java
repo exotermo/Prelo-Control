@@ -89,4 +89,69 @@ class ConnectionServiceTest {
         assertTrue(disabled.route(UUID.randomUUID()).isEmpty());
         assertThrows(ConnectionService.ConnectionsDisabledException.class, () -> disabled.summary(null));
     }
+
+    // --- Fase X: subscription CLIs (hybrid use) ---
+
+    private ConnectionService withCli(CliRunnerClient cli) {
+        var props = new ConnectionProperties("/nonexistent", false, Duration.ofSeconds(30), Duration.ofSeconds(5), 512,
+            "http://cli-runner:8099", "t".repeat(40), Duration.ofSeconds(60));
+        return new ConnectionService(repository, props, wire, null, cipher, cli);
+    }
+
+    @Test void aCliConnectionOnlyServesTheOwnersOwnWork() {
+        UUID project = UUID.randomUUID();
+        var instance = new ProviderConnection("INSTANCE", null);
+        instance.configure("openai", "https://api.openai.com/v1", "gpt-mini");
+        var own = new ProviderConnection("PROJECT", project);
+        own.configure("claude_cli", "cli-runner", "sonnet");
+        when(repository.findFirstByScope("INSTANCE")).thenReturn(Optional.of(instance));
+        when(repository.findByScopeAndProjectId("PROJECT", project)).thenReturn(Optional.of(own));
+
+        assertEquals("sonnet", service.route(project, "MANUAL").orElseThrow().model());
+        assertEquals("gpt-mini", service.route(project, "MESSAGING").orElseThrow().model(), "WhatsApp must use the API connection");
+        assertEquals("gpt-mini", service.route(project, null).orElseThrow().model(), "unknown origin is never treated as the owner");
+    }
+
+    @Test void withOnlyACliInstanceConnectionWhatsAppFallsBackToTheStaticProfiles() {
+        var instance = new ProviderConnection("INSTANCE", null);
+        instance.configure("codex_cli", "cli-runner", "default");
+        when(repository.findFirstByScope("INSTANCE")).thenReturn(Optional.of(instance));
+        assertTrue(service.route(null, "MESSAGING").isEmpty());
+        assertTrue(service.route(null, "MANUAL").isPresent());
+    }
+
+    @Test void theInstanceConnectionCanBeSwitchedOff() {
+        var instance = new ProviderConnection("INSTANCE", null);
+        instance.configure("openai", "https://api.openai.com/v1", "gpt-mini");
+        when(repository.findFirstByScope("INSTANCE")).thenReturn(Optional.of(instance));
+        service.setActive(null, false);
+        assertTrue(service.route(null, "MESSAGING").isEmpty(), "an inactive instance connection must not answer");
+    }
+
+    @Test void aCliConnectionIsSavedWithoutAKeyAfterARealAnswer() {
+        CliRunnerClient cli = mock(CliRunnerClient.class);
+        when(cli.configured()).thenReturn(true);
+        when(cli.status("claude_cli")).thenReturn(new CliRunnerClient.EngineStatus(true, "login"));
+        var svc = withCli(cli);
+        var summary = svc.save(UUID.randomUUID(), new ConnectionService.SaveCommand("claude_cli", "https://evil.example", "sonnet", "sk-ignored"));
+        assertFalse(summary.hasKey(), "a CLI connection never stores a key");
+        assertEquals("cli-runner", summary.baseUrl(), "the user cannot point a CLI connection anywhere");
+        verify(cli).chat(eq("claude_cli"), eq("sonnet"), any(), any());
+    }
+
+    @Test void aLoggedOutCliIsRefusedWithTheLoginCommand() {
+        CliRunnerClient cli = mock(CliRunnerClient.class);
+        when(cli.configured()).thenReturn(true);
+        when(cli.status("codex_cli")).thenReturn(new CliRunnerClient.EngineStatus(false, "docker compose exec -it cli-runner codex login --device-auth"));
+        var error = assertThrows(ConnectionValidationException.class,
+            () -> withCli(cli).save(null, new ConnectionService.SaveCommand("codex_cli", null, "default", null)));
+        assertTrue(error.getMessage().contains("codex login --device-auth"), error.getMessage());
+        verify(repository, never()).save(any());
+    }
+
+    @Test void noCreditIsToldApartFromRateLimiting() {
+        when(wire.listModels(any(), any(), any(), any())).thenThrow(new br.com.exotermo.prelo.gateway.provider.ProviderQuotaExceededException("q"));
+        var result = service.test("openai", null, "sk-0123456789abcdef");
+        assertEquals("a conta do provedor está sem crédito — adicione saldo no painel de cobrança dele", result.error());
+    }
 }

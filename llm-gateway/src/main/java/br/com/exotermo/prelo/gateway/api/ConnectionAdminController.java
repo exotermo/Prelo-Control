@@ -26,6 +26,12 @@ public class ConnectionAdminController {
     public record SaveRequest(String provider, String baseUrl, String model, String apiKey) { }
     public record ActiveRequest(boolean active) { }
 
+    @GetMapping("/cli-status")
+    public ConnectionService.CliStatus cliStatus() { return connections.cliStatus(); }
+
+    @PutMapping("/instance/active")
+    public ConnectionSummary setInstanceActive(@RequestBody ActiveRequest body) { return connections.setActive(null, body.active()); }
+
     @GetMapping("/instance")
     public ConnectionSummary instance() { return connections.summary(null); }
 

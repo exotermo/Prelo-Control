@@ -63,7 +63,7 @@ class ConnectionAdminSecurityTest {
 
     @Test void theAdminScopeCanReadAndNoTokenIsRejected() throws Exception {
         when(connections.summary(null)).thenReturn(new ConnectionService.ConnectionSummary(false, "INSTANCE", null, null, null, null,
-            false, false, null, null, null, null, null, null));
+            false, false, null, null, null, null, null, null, null, null, null));
         mockMvc.perform(get("/api/v1/admin/connections/instance").header("Authorization", "Bearer " + token(List.of("llm:admin"))))
             .andExpect(status().isOk());
         mockMvc.perform(get("/api/v1/admin/connections/instance")).andExpect(status().isUnauthorized());

@@ -139,7 +139,14 @@ class ProviderWireClient {
         }
         int status = response.statusCode();
         if (status == 401 || status == 403) throw new ProviderAuthenticationException(provider + " rejected credentials");
-        if (status == 429) throw new ProviderRateLimitedException(provider + " rate limited the request");
+        if (status == 429) {
+            // OpenAI answers 429 both for "slow down" and for "no credit left"; only the error code
+            // tells them apart (read, never echoed).
+            if (response.body() != null && response.body().contains("insufficient_quota")) {
+                throw new ProviderQuotaExceededException(provider + " account has no credit");
+            }
+            throw new ProviderRateLimitedException(provider + " rate limited the request");
+        }
         if (status >= 500) throw new ProviderUnavailableException(provider + " returned " + status);
         if (status < 200 || status >= 300) throw new ProviderRejectedRequestException(provider + " rejected the request (" + status + ")");
         try {
