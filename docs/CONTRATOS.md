@@ -1,8 +1,26 @@
-# Contratos do Prelo Control para outros sistemas
+# Contratos do Prelo Control para outros sistemas — v2
 
-> Estado em 2026-10-04 (fases até T). Referência para quem integra com o Prelo: BastionDeploy, Work
-> Control, scripts e o próprio messager. O Prelo é a **fonte de verdade** de projetos, tasks, execuções,
-> pipeline, servidores e aprovações; ninguém mantém uma cópia própria dessas decisões.
+> Estado em 2026-10-04 (fases até T + Fase 0 de integração). Referência para quem integra com o Prelo:
+> BastionDeploy, Work Control, scripts e o próprio messager. O Prelo é a **fonte de verdade** de identidade,
+> projetos, tasks, execuções, pipeline, servidores e aprovações; ninguém mantém uma cópia própria dessas
+> decisões (ADR-015). Seções 1–5 descrevem o que **já existe**; a seção 6 lista o que está **congelado e ainda
+> não implementado**. Mudanças: `docs/integracoes/PROPOSTAS.md`.
+
+## 0. Quem é dono de quê
+
+| Tema | Prelo | Work Control | BastionDeploy |
+|---|---|---|---|
+| Identidade, login, TOTP, sessões, revogação | **dono** | consome (biometria só local) | usa chave de API do projeto |
+| Workspace, projetos, membros, papéis | **dono** | exibe | referencia `projectId` |
+| Clientes (CRM) | **dono** | exibe | — |
+| Tasks, execuções, pipeline, agentes, ferramentas | **dono** | exibe, cria, delega | — |
+| Política de risco e aprovações | **dono (única)** | decide pela API do Prelo | **pede** e obedece |
+| Aviso ao dono (WhatsApp) | **dono** | — | — |
+| Servidores monitorados (SSH, saúde) | **dono** | exibe | — |
+| Apps, ambientes, repositórios, segredos de app | referência | exibe via Prelo | **dono** |
+| Pedidos de deploy, jobs, releases, rollback, logs de build | espelho do status | exibe via Prelo | **dono** |
+| Workers, isolamento, publicação (cloudflared) | — | exibe URL | **dono** |
+| Auditoria | decisões | — | execução, reportada ao Prelo |
 
 ## 1. Autenticação
 
@@ -88,3 +106,22 @@ Entrega com retry exponencial (até 8 tentativas); destino interno bloqueado (an
 Ninguém além do gateway fala com provedores. O core manda `metadata.origin` (= `task.source`):
 conexões por assinatura (`claude_cli`, `codex_cli`) só atendem `MANUAL`; WhatsApp e prospecção usam a
 conexão por API da instância (ou o modelo simulado).
+
+## 6. Contratos congelados, ainda não implementados
+
+| # | Lacuna | Contrato | PR do Prelo |
+|---|---|---|---|
+| G1 | Workspace | `workspaceId` da instância — `integracoes/sessao-mobile.md` | PR-1 |
+| G2 | Sessão do app (refresh no corpo, por dispositivo, rotação, revogação) | `integracoes/sessao-mobile.md` | PR-2 |
+| G3 | `GET /api/v1/me` | `integracoes/sessao-mobile.md` | PR-1 |
+| G4 | Tempo real | v1 polling; v2 SSE `GET /api/v1/events/stream` (a especificar) | PR-4 |
+| G5 | Pedido de ação externa | `integracoes/action-requests.md` | PR-3 |
+| G6 | Decisão de volta (`action.decided` + `GET`) | `integracoes/action-requests.md` | PR-3 |
+| G7 | Resultado da execução | `integracoes/action-requests.md` | PR-3 |
+| G8 | Ações/deploys por projeto (leitura) | `integracoes/action-requests.md` | PR-3 |
+| G9 | Confirmação com TOTP para aprovar ALTO pelo app | `integracoes/sessao-mobile.md` | PR-2 |
+| G10 | Ferramenta `request_deploy` (agente pede; aprovação é a do G5) | a especificar com a API do Bastion | PR-4 |
+| G11 | Push no celular (sem dados sensíveis) | a especificar | PR-4 |
+
+Enquanto não existem: o Work Control usa o login atual com sessão só em memória e polling; o BastionDeploy
+desenvolve contra um stub de `action-requests`.
