@@ -344,6 +344,11 @@ func RequestID(ctx context.Context) string {
 }
 
 func requiredScope(method, path string) string {
+	// PR-1 (contratos G3): any person's session — both roles carry projects:read; integration
+	// keys and technical tokens don't, so they get 403 before reaching the handler.
+	if path == "/api/v1/me" {
+		return "projects:read"
+	}
 	// Fase T: the owner's WhatsApp answer, relayed only by prelo-messaging-bridge.
 	if strings.HasPrefix(path, "/api/v1/approvals/by-code/") {
 		return "approvals:decide-owner"

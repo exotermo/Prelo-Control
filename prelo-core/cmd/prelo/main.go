@@ -215,6 +215,8 @@ func main() {
 		projectMemberRepo = postgres.NewProjectMemberRepository(pool)
 		projectHandler := api.NewProjectHandler(projectRepo, projectMemberRepo)
 		api.RegisterProjectRoutes(mux, projectHandler)
+		// PR-1 (contratos G1/G3): who am I + the instance's workspace.
+		api.RegisterMeRoutes(mux, api.NewMeHandler(dashboardUsers, projectRepo, projectMemberRepo, postgres.NewWorkspaceRepository(pool)))
 
 		// Fase C1: clients (CRM), search, home (recent + pending) and client timeline.
 		clientRepo := postgres.NewClientRepository(pool)
