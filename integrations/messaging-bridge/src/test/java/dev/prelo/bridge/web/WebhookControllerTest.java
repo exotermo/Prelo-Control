@@ -45,7 +45,7 @@ class WebhookControllerTest {
     void runtimePauseImmediatelyStopsAStaticallyEnabledBridge() throws Exception {
         BridgeProperties properties = new BridgeProperties("", "", "", SECRET, "", true, "admin", List.of());
         AutoReplyGate gate = new AutoReplyGate(properties);
-        new AdminController(properties, gate, mock(OwnerContactStore.class), mock(MessagingCoreClient.class)).pause("admin");
+        new AdminController(properties, gate, mock(OwnerContactStore.class), mock(MessagingCoreClient.class), mock(dev.prelo.bridge.service.OutboundMessenger.class)).pause("admin");
         InboundMessageHandler handler = mock(InboundMessageHandler.class);
         InboundEventStore events = mock(InboundEventStore.class);
         WebhookController controller = new WebhookController(properties, new ObjectMapper(), handler, gate, events);

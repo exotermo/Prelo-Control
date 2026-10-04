@@ -20,7 +20,7 @@ class AdminControllerTest {
     void pauseImmediatelyDisablesAStaticallyEnabledBridge() {
         BridgeProperties properties = new BridgeProperties("", "", "", "", "", true, "admin-token", List.of());
         AutoReplyGate gate = new AutoReplyGate(properties);
-        AdminController controller = new AdminController(properties, gate, mock(OwnerContactStore.class), mock(MessagingCoreClient.class));
+        AdminController controller = new AdminController(properties, gate, mock(OwnerContactStore.class), mock(MessagingCoreClient.class), mock(dev.prelo.bridge.service.OutboundMessenger.class));
 
         assertEquals(HttpStatus.OK, controller.pause("admin-token").getStatusCode());
         assertEquals(false, gate.isEnabled());
@@ -31,7 +31,7 @@ class AdminControllerTest {
     @Test
     void listOwnerContacts_requiresTheAdminToken() {
         BridgeProperties properties = new BridgeProperties("", "", "", "", "", true, "admin-token", List.of());
-        AdminController controller = new AdminController(properties, new AutoReplyGate(properties), mock(OwnerContactStore.class), mock(MessagingCoreClient.class));
+        AdminController controller = new AdminController(properties, new AutoReplyGate(properties), mock(OwnerContactStore.class), mock(MessagingCoreClient.class), mock(dev.prelo.bridge.service.OutboundMessenger.class));
 
         assertThrows(ResponseStatusException.class, () -> controller.listOwnerContacts("wrong-token"));
         assertThrows(ResponseStatusException.class, () -> controller.listOwnerContacts(null));
@@ -40,7 +40,7 @@ class AdminControllerTest {
     @Test
     void replaceOwnerContacts_rejectsANonE164Number() {
         BridgeProperties properties = new BridgeProperties("", "", "", "", "", true, "admin-token", List.of());
-        AdminController controller = new AdminController(properties, new AutoReplyGate(properties), mock(OwnerContactStore.class), mock(MessagingCoreClient.class));
+        AdminController controller = new AdminController(properties, new AutoReplyGate(properties), mock(OwnerContactStore.class), mock(MessagingCoreClient.class), mock(dev.prelo.bridge.service.OutboundMessenger.class));
 
         var ex = assertThrows(ResponseStatusException.class,
             () -> controller.replaceOwnerContacts("admin-token", new AdminController.OwnerContactsRequest(List.of("41984450529"))));
@@ -52,7 +52,7 @@ class AdminControllerTest {
         BridgeProperties properties = new BridgeProperties("", "", "", "", "", true, "admin-token", List.of());
         OwnerContactStore store = mock(OwnerContactStore.class);
         when(store.list()).thenReturn(List.of("+5541984450529", "+5541996635461"));
-        AdminController controller = new AdminController(properties, new AutoReplyGate(properties), store, mock(MessagingCoreClient.class));
+        AdminController controller = new AdminController(properties, new AutoReplyGate(properties), store, mock(MessagingCoreClient.class), mock(dev.prelo.bridge.service.OutboundMessenger.class));
 
         var response = controller.replaceOwnerContacts("admin-token",
             new AdminController.OwnerContactsRequest(List.of("+5541984450529", "+5541996635461")));
@@ -68,7 +68,7 @@ class AdminControllerTest {
         when(messagingCore.listChannels()).thenReturn(List.of(
             new MessagingCoreClient.ChannelSummary("chan-1", "WHATSAPP", "CONNECTED", "554184450529:9@s.whatsapp.net", "2026-09-29T18:43:27Z"),
             new MessagingCoreClient.ChannelSummary("chan-2", "TELEGRAM", "CONNECTED", "@somebot", "2026-09-29T18:43:27Z")));
-        AdminController controller = new AdminController(properties, new AutoReplyGate(properties), mock(OwnerContactStore.class), messagingCore);
+        AdminController controller = new AdminController(properties, new AutoReplyGate(properties), mock(OwnerContactStore.class), messagingCore, mock(dev.prelo.bridge.service.OutboundMessenger.class));
 
         var response = controller.channelStatus("admin-token");
 
@@ -79,7 +79,7 @@ class AdminControllerTest {
     @Test
     void channelStatus_requiresTheAdminToken() {
         BridgeProperties properties = new BridgeProperties("", "", "", "", "", true, "admin-token", List.of());
-        AdminController controller = new AdminController(properties, new AutoReplyGate(properties), mock(OwnerContactStore.class), mock(MessagingCoreClient.class));
+        AdminController controller = new AdminController(properties, new AutoReplyGate(properties), mock(OwnerContactStore.class), mock(MessagingCoreClient.class), mock(dev.prelo.bridge.service.OutboundMessenger.class));
 
         assertThrows(ResponseStatusException.class, () -> controller.channelStatus("wrong-token"));
     }

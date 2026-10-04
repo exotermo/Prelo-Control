@@ -23,6 +23,19 @@ public class OwnerContactStore {
         return jdbc.query("SELECT phone_e164 FROM owner_contacts ORDER BY added_at", (rs, rowNum) -> rs.getString("phone_e164"));
     }
 
+    /**
+     * Fase T: whether a WhatsApp sender (phone JID, typed number or "@lid" ID) is one of the owners,
+     * comparing normalized numbers — the sender no longer has to match the stored text exactly.
+     */
+    public boolean isOwner(String sender) {
+        java.util.Set<String> keys = dev.prelo.bridge.contact.ContactAddress.matchKeys(sender);
+        if (keys.isEmpty()) return false;
+        for (String owner : list()) {
+            if (keys.contains(dev.prelo.bridge.contact.ContactAddress.canonical(owner))) return true;
+        }
+        return false;
+    }
+
     public boolean contains(String phoneE164) {
         Integer count = jdbc.queryForObject("SELECT count(*) FROM owner_contacts WHERE phone_e164 = ?", Integer.class, phoneE164);
         return count != null && count > 0;

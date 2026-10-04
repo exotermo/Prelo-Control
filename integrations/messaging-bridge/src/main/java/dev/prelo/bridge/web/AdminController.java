@@ -7,6 +7,7 @@ import dev.prelo.bridge.service.AutoReplyGate;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.util.List;
+import java.util.Map;
 import java.util.regex.Pattern;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -27,13 +28,55 @@ public class AdminController {
     private final AutoReplyGate gate;
     private final OwnerContactStore ownerContacts;
     private final MessagingCoreClient messagingCore;
+    private final dev.prelo.bridge.service.OutboundMessenger messenger;
 
-    public AdminController(BridgeProperties properties, AutoReplyGate gate, OwnerContactStore ownerContacts, MessagingCoreClient messagingCore) {
+    public AdminController(BridgeProperties properties, AutoReplyGate gate, OwnerContactStore ownerContacts, MessagingCoreClient messagingCore,
+                           dev.prelo.bridge.service.OutboundMessenger messenger) {
         this.properties = properties;
         this.gate = gate;
         this.ownerContacts = ownerContacts;
         this.messagingCore = messagingCore;
+        this.messenger = messenger;
     }
+
+    private static final int MAX_TEXT = 4000;
+
+    // Fase T: an agent's message to a client, sent by prelo-core only after the owner approved it.
+    @PostMapping("/admin/outbound")
+    public ResponseEntity<Map<String, Object>> outbound(@RequestHeader(value = "X-Admin-Token", required = false) String token,
+                                                        @RequestBody OutboundRequest request) {
+        requireAdminToken(token);
+        if (request.to() == null || request.to().isBlank() || request.text() == null || request.text().isBlank() || request.text().length() > MAX_TEXT) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "to and text (up to 4000 characters) are required");
+        }
+        sendOr503(() -> messenger.send(request.to().trim(), request.text().trim()));
+        return ResponseEntity.ok(Map.of("queued", 1));
+    }
+
+    // Fase T: approval requests (and other notices) to every owner contact.
+    @PostMapping("/admin/owner-notifications")
+    public ResponseEntity<Map<String, Object>> notifyOwners(@RequestHeader(value = "X-Admin-Token", required = false) String token,
+                                                            @RequestBody NotificationRequest request) {
+        requireAdminToken(token);
+        if (request.text() == null || request.text().isBlank() || request.text().length() > MAX_TEXT) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "text (up to 4000 characters) is required");
+        }
+        int[] queued = {0};
+        sendOr503(() -> queued[0] = messenger.notifyOwners(request.text().trim()));
+        if (queued[0] == 0) throw new ResponseStatusException(HttpStatus.CONFLICT, "no owner contact registered");
+        return ResponseEntity.ok(Map.of("queued", queued[0]));
+    }
+
+    private static void sendOr503(Runnable action) {
+        try {
+            action.run();
+        } catch (dev.prelo.bridge.service.OutboundMessenger.NoConnectedChannelException exception) {
+            throw new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE, "WhatsApp is not connected");
+        }
+    }
+
+    public record OutboundRequest(String to, String text) { }
+    public record NotificationRequest(String text) { }
 
     // Fase H4: prelo-dashboard's Integrações page. Only WhatsApp channels are relevant today
     // (the only channel type this deployment ever registers) — filtering here keeps the response

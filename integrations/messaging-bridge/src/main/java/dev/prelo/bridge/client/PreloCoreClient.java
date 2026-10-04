@@ -35,6 +35,33 @@ public class PreloCoreClient {
             properties.preloApiJwtAudience(), SCOPES, TOKEN_TTL);
     }
 
+    /** Outcome of an owner's WhatsApp answer to an approval request (Fase T). */
+    public enum DecisionOutcome { APPROVED, DENIED, NOT_FOUND, ALREADY_CLOSED, FAILED }
+
+    // Separate, narrower token: only the owner's answer ever needs approvals:decide-owner.
+    private String decisionToken() {
+        return PreloCoreJwt.mint(properties.preloApiJwtSecret(), properties.preloApiJwtIssuer(),
+            properties.preloApiJwtAudience(), List.of("approvals:decide-owner"), TOKEN_TTL);
+    }
+
+    public DecisionOutcome decideApproval(String code, boolean approve, String decidedBy) {
+        try {
+            client.post().uri("/api/v1/approvals/by-code/{code}/{decision}", code, approve ? "approve" : "deny")
+                .header("Authorization", "Bearer " + decisionToken())
+                .body(Map.of("decidedBy", decidedBy))
+                .retrieve().toBodilessEntity();
+            return approve ? DecisionOutcome.APPROVED : DecisionOutcome.DENIED;
+        } catch (org.springframework.web.client.HttpClientErrorException exception) {
+            if (exception.getStatusCode().value() == 404) return DecisionOutcome.NOT_FOUND;
+            if (exception.getStatusCode().value() == 409) return DecisionOutcome.ALREADY_CLOSED;
+            log.warn("prelo-core refused an approval decision: {}", exception.getStatusCode());
+            return DecisionOutcome.FAILED;
+        } catch (RuntimeException exception) {
+            log.error("prelo-core: approval decision failed", exception);
+            return DecisionOutcome.FAILED;
+        }
+    }
+
     public ExecutionResult run(String description, String agentId, String contactAddress, Duration timeout) {
         String taskId;
         try {
