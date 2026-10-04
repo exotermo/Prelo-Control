@@ -180,8 +180,8 @@ export function IntegrationsPage() {
         <div>
           <h2 style={{ marginBottom: 4 }}>Integrações</h2>
           <p className="muted" style={{ maxWidth: 620 }}>
-            Tudo que conecta o projeto <strong>{projectName}</strong> a outros serviços — quem chama o Hermes e quem o
-            Hermes avisa.
+            Tudo que conecta o projeto <strong>{projectName}</strong> a outros serviços — quem chama o Prelo e quem o
+            Prelo avisa.
           </p>
         </div>
         <div style={{ display: "flex", gap: 10 }}>
@@ -245,7 +245,7 @@ export function IntegrationsPage() {
         <>
           {apiKeys.length > 0 && (
             <section className="clipping-section">
-              <h4 className="clipping-section-title">Apps que chamam o Hermes</h4>
+              <h4 className="clipping-section-title">Apps que chamam o Prelo</h4>
               <div className="clipping-grid">
                 {apiKeys.map((k, index) => (
                   <ApiKeyClipping

@@ -26,7 +26,7 @@ const BASE_ROUTES: { id: Route; label: string }[] = [
 ];
 // Everything here requires the users:manage/settings:manage scope only an ADMIN session carries
 // — hidden for OPERATOR sessions so the nav never points at a page every API call on it would
-// 403. hermes-go enforces this regardless; this is purely so the UI doesn't dangle a dead link.
+// 403. prelo-core enforces this regardless; this is purely so the UI doesn't dangle a dead link.
 const ADMIN_ROUTES: { id: Route; label: string }[] = [
   { id: "integrations", label: "Integrações" },
   { id: "settings", label: "Configurações" },
@@ -92,8 +92,8 @@ function Shell() {
     <div className="app-shell">
       <header className="app-topnav">
         <div className="brand">
-          <span className="brand-mark">H</span>
-          <h1>Hermes</h1>
+          <span className="brand-mark">P</span>
+          <h1>Prelo Control</h1>
         </div>
         <nav aria-label="Navegação principal">
           {routes.map((item) => (

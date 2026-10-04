@@ -146,7 +146,7 @@ export function ConnectModelModal({
                   required={keyRequired} autoFocus={provider !== "openai_compatible"} />
               </label>
               <div className="wizard-note">
-                A chave vai direto para o cofre do <code>llm-gateway</code> e nunca mais aparece inteira. Antes de salvar, o Hermes testa a
+                A chave vai direto para o cofre do <code>llm-gateway</code> e nunca mais aparece inteira. Antes de salvar, o Prelo testa a
                 chave e busca a lista de modelos dela.
               </div>
             </>

@@ -1,8 +1,8 @@
-// Thin client for hermes-go's public API. Fase G1: hermes-go now requires a dashboard session
+// Thin client for prelo-core's public API. Fase G1: prelo-core now requires a dashboard session
 // (token_use=dashboard) for every /api/v1/* route except /dashboard-auth/* itself — every call
 // below carries an Authorization: Bearer header.
 export const BASE_URL: string =
-  (import.meta.env.VITE_HERMES_URL as string | undefined) ?? "http://127.0.0.1:8082";
+  (import.meta.env.VITE_PRELO_URL as string | undefined) ?? "http://127.0.0.1:8082";
 
 export class ApiError extends Error {
   status: number;
@@ -25,7 +25,7 @@ async function parseErrorBody(response: Response): Promise<{ code: string | null
 }
 
 // projectId (Fase W) is sent as X-Project-Id on every project-scoped call — absent means the
-// "unassigned" bucket (hermes-go's JWTAuthMiddleware.resolveProject default), never "everything".
+// "unassigned" bucket (prelo-core's JWTAuthMiddleware.resolveProject default), never "everything".
 async function request<T>(path: string, init: RequestInit, token?: string, projectId?: string): Promise<T> {
   const headers = new Headers(init.headers);
   if (token) headers.set("Authorization", `Bearer ${token}`);
@@ -92,7 +92,7 @@ export interface Task {
   agentId: string;
   createdAt: string;
   // MANUAL = created through this page's own form (or another API caller acting as one);
-  // MESSAGING = hermes-messaging-bridge created it for one inbound WhatsApp message. Found
+  // MESSAGING = prelo-messaging-bridge created it for one inbound WhatsApp message. Found
   // 2026-10-02: without this, every WhatsApp exchange showed up here indistinguishable from a
   // task someone actually designated.
   source: "MANUAL" | "MESSAGING";
@@ -224,7 +224,7 @@ export function denyRequest(token: string, id: string, decidedBy: string): Promi
   return postJSON<ApprovalRequest>(`/api/v1/approvals/${id}/deny`, { decidedBy }, token);
 }
 
-// --- settings (Fase G2): hermes-messaging-bridge's owner-contacts, proxied by hermes-go ---
+// --- settings (Fase G2): prelo-messaging-bridge's owner-contacts, proxied by prelo-core ---
 
 export interface OwnerContacts {
   contacts: string[];
@@ -239,8 +239,8 @@ export function setOwnerContacts(token: string, contacts: string[]): Promise<Own
     { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ contacts }) }, token);
 }
 
-// --- integrations (Fase H4): WhatsApp channel status + auto-reply toggle, proxied by hermes-go
-// through hermes-messaging-bridge to messaging-core — no more checking psql/docker logs to know
+// --- integrations (Fase H4): WhatsApp channel status + auto-reply toggle, proxied by prelo-core
+// through prelo-messaging-bridge to messaging-core — no more checking psql/docker logs to know
 // if WhatsApp is connected. ---
 
 export interface ChannelStatus {
@@ -276,7 +276,7 @@ export function setAutoReply(token: string, enabled: boolean): Promise<AutoReply
 
 // --- users (Fase H — RBAC): ADMIN-only, gated by the users:manage scope server-side. The
 // client-side role check below is purely a UI convenience (hide controls a request would 403
-// on anyway) — hermes-go is what actually enforces it. ---
+// on anyway) — prelo-core is what actually enforces it. ---
 
 export type DashboardRole = "ADMIN" | "OPERATOR";
 
@@ -302,7 +302,7 @@ export function changeDashboardUserRole(token: string, userId: string, role: Das
     { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ role }) }, token);
 }
 
-// Reads sub/scope straight off the JWT payload — never trusted for authorization (hermes-go
+// Reads sub/scope straight off the JWT payload — never trusted for authorization (prelo-core
 // re-checks every scope server-side), only used to decide what the UI shows (e.g. the Usuários
 // nav link) without an extra round trip.
 export function decodeDashboardToken(token: string): { sub: string; scopes: string[] } | null {
@@ -410,7 +410,7 @@ export function listAgents(token: string): Promise<AgentSummary[]> {
   return request<AgentSummary[]>("/api/v1/agents", { method: "GET" }, token);
 }
 
-// --- project files (Fase PA): sealed at rest by hermes-go; up to 100 MB each. ---
+// --- project files (Fase PA): sealed at rest by prelo-core; up to 100 MB each. ---
 
 export interface ProjectFile {
   id: string;
@@ -498,7 +498,7 @@ export function removeProjectMember(token: string, projectId: string, userId: st
   return request<void>(`/api/v1/projects/${projectId}/members/${userId}`, { method: "DELETE" }, token);
 }
 
-// --- model connections (Fase M): provider keys live sealed in the llm-gateway vault; hermes-go
+// --- model connections (Fase M): provider keys live sealed in the llm-gateway vault; prelo-core
 // only relays. Nothing here ever receives a key back — only hasKey / keyLast4. ---
 
 export type ModelProvider = "anthropic" | "openai" | "openai_compatible";

@@ -3,7 +3,7 @@ import { createContext, useCallback, useContext, useMemo, useState, type ReactNo
 // Fase W: the "current project" is a per-viewer UI selection, not session state — the same
 // dashboard session moves between several projects across requests (sent as X-Project-Id, see
 // api/client.ts), so this never belongs in AuthContext/the JWT itself.
-const STORAGE_KEY = "hermes-dashboard:current-project";
+const STORAGE_KEY = "prelo-dashboard:current-project";
 
 function readStoredSelection(): { id: string; name: string } | null {
   try {

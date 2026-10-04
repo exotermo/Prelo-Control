@@ -1,6 +1,6 @@
-# hermes-dashboard
+# prelo-dashboard
 
-SPA de administração do Hermes (`hermes-app-go`) — mesmo padrão do `messager-dashboard`
+SPA de administração do Prelo (`prelo-core`) — mesmo padrão do `messager-dashboard`
 (React + Vite + TypeScript, repositório separado, consome a API direto do browser).
 
 ## Telas
@@ -15,9 +15,9 @@ SPA de administração do Hermes (`hermes-app-go`) — mesmo padrão do `message
 
 ## Limitações conhecidas
 
-- **`hermes-go` não tem autenticação hoje** (diferente do `messaging-core`, que tem OAuth2) —
+- **`prelo-core` não tem autenticação hoje** (diferente do `messaging-core`, que tem OAuth2) —
   este dashboard funciona sem login. Está OK para localhost; expor além disso precisa primeiro
-  de um gate de auth no `hermes-go` (ver ADR-014, "evolução futura" — deliberadamente fora de
+  de um gate de auth no `prelo-core` (ver ADR-014, "evolução futura" — deliberadamente fora de
   escopo desta etapa).
 - A lista de tasks (`GET /api/v1/tasks`) só mostra tasks de topo (sem pai) — uma sub-task
   delegada aparece na árvore de delegação da task pai, não na lista principal.
@@ -36,19 +36,19 @@ docker compose up -d --build
 # abre em http://127.0.0.1:5176
 ```
 
-`VITE_HERMES_URL` (build arg / env) aponta para o `hermes-go` — default
+`VITE_PRELO_URL` (build arg / env) aponta para o `prelo-core` — default
 `http://127.0.0.1:8082`, que já é a porta publicada pelo `compose.yaml` de
-`~/projects/hermes e renato`.
+`~/projects/prelo e renato`.
 
 ### Dev local
 
 ```bash
-cp .env.example .env   # ajuste VITE_HERMES_URL se necessário
+cp .env.example .env   # ajuste VITE_PRELO_URL se necessário
 npm install
 npm run dev
 ```
 
-Certifique-se de que o `hermes-go` está rodando (`docker compose up -d hermes-go` no repositório
+Certifique-se de que o `prelo-core` está rodando (`docker compose up -d prelo-core` no repositório
 principal) — o CORS já está liberado lá (`internal/platform/cors.go`), de forma deliberadamente
-permissiva (`Access-Control-Allow-Origin: *`, sem credenciais) já que `hermes-go` não tem
+permissiva (`Access-Control-Allow-Origin: *`, sem credenciais) já que `prelo-core` não tem
 autenticação nem sessão para proteger hoje.

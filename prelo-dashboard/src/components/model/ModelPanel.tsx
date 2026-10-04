@@ -194,7 +194,7 @@ export function ModelPanel({ token, scope: scopeProp, canManage, title }: { toke
           <span className="clipping-kicker">Cofre · como sua chave é guardada</span>
           <ol>
             <li>Sai do navegador uma única vez, por HTTPS.</li>
-            <li>O hermes-go só repassa: não grava nem registra em log.</li>
+            <li>O prelo-core só repassa: não grava nem registra em log.</li>
             <li>O llm-gateway cifra com AES-256-GCM usando uma chave derivada só para ela (HKDF com salt aleatório de 32 bytes) e nonce novo a cada gravação.</li>
             <li>A chave-mestra fica num secret do Docker, fora do banco — um dump do banco sozinho não abre nada.</li>
             <li>A tela nunca mais mostra a chave: só os 4 últimos caracteres.</li>

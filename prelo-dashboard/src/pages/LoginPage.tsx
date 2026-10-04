@@ -9,7 +9,7 @@ import { activateHumanUser, confirmPasswordReset, requestPasswordReset } from ".
 // sessionStorage fallback, keyed by route, survives that reload without bringing the token back
 // into the URL/history; it's cleared once the flow actually succeeds.
 function linkTokenStorageKey(): string {
-  return `hermes-dashboard:link-token:${window.location.pathname}`;
+  return `prelo-dashboard:link-token:${window.location.pathname}`;
 }
 function readLinkToken(): string | null {
   const fromUrl = new URLSearchParams(window.location.search).get("token");
@@ -118,7 +118,7 @@ export function LoginPage() {
   return (
     <div className="centered-page">
       <form className="card auth-card" onSubmit={handleSubmit}>
-        <h1>Hermes</h1>
+        <h1>Prelo Control</h1>
         <p className="muted">Entre com o seu usuário para acessar o console do agente.</p>
         <label>Email<input type="email" autoComplete="username" value={email} onChange={(event) => setEmail(event.target.value)} autoFocus required /></label>
         <label>Senha<input type="password" autoComplete="current-password" value={password} onChange={(event) => setPassword(event.target.value)} required /></label>

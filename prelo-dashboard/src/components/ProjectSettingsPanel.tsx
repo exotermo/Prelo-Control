@@ -129,7 +129,7 @@ export function ProjectSettingsPanel({ token, project, onSaved, onDeleted }: {
           <p className="muted">Usado pelas tasks deste projeto quando ninguém escolhe um agente.</p>
           <div className="agent-options">
             <button type="button" className={`type-tile${defaultAgentId === "" ? " selected" : ""}`} disabled={!canManage} onClick={() => setDefaultAgentId("")}>
-              <strong>Padrão do Hermes</strong>
+              <strong>Padrão do Prelo</strong>
               <span>general</span>
             </button>
             {agents.map((a) => (

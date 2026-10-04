@@ -156,7 +156,7 @@ export function IntegrationModal({
                   <svg width="28" height="28" viewBox="0 0 24 24" aria-hidden="true" className="icon-stroke accent">
                     <circle cx="8" cy="15" r="4" /><path d="M11 12l9-9M17 6l3 3M15 8l2 2" />
                   </svg>
-                  <strong>App que chama o Hermes</strong>
+                  <strong>App que chama o Prelo</strong>
                   <span>Gera uma chave de API para outro sistema criar e acompanhar tasks.</span>
                   <small>ex.: seu SaaS, um script, n8n</small>
                 </button>
@@ -165,7 +165,7 @@ export function IntegrationModal({
                     <path d="M4 12h12M12 6l6 6-6 6" /><path d="M20 4v16" />
                   </svg>
                   <strong>Webhook de saída</strong>
-                  <span>O Hermes avisa uma URL sua quando algo acontece no projeto.</span>
+                  <span>O Prelo avisa uma URL sua quando algo acontece no projeto.</span>
                   <small>ex.: task concluída, aprovação pendente</small>
                 </button>
                 <button type="button" className="type-tile" disabled>
@@ -223,7 +223,7 @@ export function IntegrationModal({
               </label>
               <label>
                 URL de destino
-                <input className="mono" value={url} onChange={(e) => setUrl(e.target.value)} placeholder="https://seu-servico.com/hermes/webhook" required />
+                <input className="mono" value={url} onChange={(e) => setUrl(e.target.value)} placeholder="https://seu-servico.com/prelo/webhook" required />
               </label>
               <fieldset className="check-group">
                 <legend>Eventos que disparam</legend>
@@ -235,7 +235,7 @@ export function IntegrationModal({
                 ))}
               </fieldset>
               <div className="wizard-note">
-                Cada envio vai assinado (HMAC-SHA256 no header <code>X-Hermes-Signature</code>) e é reenviado com espera
+                Cada envio vai assinado (HMAC-SHA256 no header <code>X-Prelo-Signature</code>) e é reenviado com espera
                 crescente se a sua URL não responder 2xx.
               </div>
             </>
@@ -259,12 +259,12 @@ export function IntegrationModal({
               <div className="wizard-success"><span className="success-dot"><CheckIcon /></span>Webhook {created.name} cadastrado</div>
               <strong className="wizard-question">Segredo de assinatura</strong>
               <CopyField value={created.value} />
-              <div className="wizard-warning">Ele só aparece agora — use para validar o header <code>X-Hermes-Signature</code>.</div>
+              <div className="wizard-warning">Ele só aparece agora — use para validar o header <code>X-Prelo-Signature</code>.</div>
               <strong className="wizard-question">Exemplo do que sua URL vai receber</strong>
               <pre className="code-block">{`POST <sua URL>
-X-Hermes-Event: task.completed
-X-Hermes-Timestamp: 1790960000
-X-Hermes-Signature: sha256=HMAC(segredo, timestamp + "." + corpo)
+X-Prelo-Event: task.completed
+X-Prelo-Timestamp: 1790960000
+X-Prelo-Signature: sha256=HMAC(segredo, timestamp + "." + corpo)
 
 {
   "event": "task.completed",

@@ -151,8 +151,8 @@ export function ProjectLanding() {
     <div className="app-shell">
       <header className="app-topnav">
         <div className="brand">
-          <span className="brand-mark">H</span>
-          <h1>Hermes</h1>
+          <span className="brand-mark">P</span>
+          <h1>Prelo Control</h1>
         </div>
         <div className="app-topnav-right">
           <button onClick={logout}>Sair</button>
