@@ -1,4 +1,4 @@
-name: hermes-messaging-bridge
+name: prelo-messaging-bridge
 
 services:
   postgres:
@@ -18,7 +18,7 @@ services:
       retries: 10
     restart: unless-stopped
 
-  hermes-messaging-bridge:
+  prelo-messaging-bridge:
     build: .
     depends_on:
       postgres:
@@ -30,7 +30,7 @@ services:
       MESSAGING_CORE_CLIENT_ID: ${MESSAGING_CORE_CLIENT_ID}
       MESSAGING_CORE_CLIENT_SECRET: ${MESSAGING_CORE_CLIENT_SECRET}
       CALLBACK_SIGNING_SECRET: ${CALLBACK_SIGNING_SECRET}
-      HERMES_APP_URL: ${HERMES_APP_URL}
+      PRELO_CORE_URL: ${PRELO_CORE_URL}
       BRIDGE_AUTO_REPLY_ENABLED: ${BRIDGE_AUTO_REPLY_ENABLED:-false}
       BRIDGE_ADMIN_TOKEN: ${BRIDGE_ADMIN_TOKEN:?set BRIDGE_ADMIN_TOKEN in .env}
       BRIDGE_OWNER_CONTACTS: ${BRIDGE_OWNER_CONTACTS:-}
@@ -39,23 +39,23 @@ services:
       BRIDGE_DB_URL: jdbc:postgresql://postgres:5432/bridge
       BRIDGE_DB_USER: bridge
       BRIDGE_DB_PASSWORD: ${BRIDGE_DB_PASSWORD:?set BRIDGE_DB_PASSWORD in .env}
-      # Must equal hermes-go's own HERMES_GO_API_JWT_SECRET/_ISSUER/_AUDIENCE — the bridge mints
-      # its own token for hermes-go locally (HermesAppClient/HermesAppJwt) instead of reusing the
-      # messaging-core client_credentials token, which carries the wrong scopes for hermes-go.
-      HERMES_GO_API_JWT_SECRET: ${HERMES_GO_API_JWT_SECRET:?set HERMES_GO_API_JWT_SECRET in .env (same value as hermes-go's)}
-      HERMES_GO_API_JWT_ISSUER: ${HERMES_GO_API_JWT_ISSUER:-messaging-core}
-      HERMES_GO_API_JWT_AUDIENCE: ${HERMES_GO_API_JWT_AUDIENCE:-messaging-core}
+      # Must equal prelo-core's own PRELO_API_JWT_SECRET/_ISSUER/_AUDIENCE — the bridge mints
+      # its own token for prelo-core locally (PreloCoreClient/PreloCoreJwt) instead of reusing the
+      # messaging-core client_credentials token, which carries the wrong scopes for prelo-core.
+      PRELO_API_JWT_SECRET: ${PRELO_API_JWT_SECRET:?set PRELO_API_JWT_SECRET in .env (same value as prelo-core's)}
+      PRELO_API_JWT_ISSUER: ${PRELO_API_JWT_ISSUER:-messaging-core}
+      PRELO_API_JWT_AUDIENCE: ${PRELO_API_JWT_AUDIENCE:-messaging-core}
     networks:
       default:
-      hermes-shared:
-        # Fase G2: lets hermes-go reach this service's admin API (GET/PUT
+      prelo-shared:
+        # Fase G2: lets prelo-core reach this service's admin API (GET/PUT
         # /admin/owner-contacts) by name for the Configurações page, same alias pattern as
-        # hermes-go's own entry on this network.
+        # prelo-core's own entry on this network.
         aliases:
-          - hermes-messaging-bridge
+          - prelo-messaging-bridge
 
 networks:
-  hermes-shared:
+  prelo-shared:
     external: true
 
 volumes:

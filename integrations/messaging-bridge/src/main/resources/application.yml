@@ -2,7 +2,7 @@ server:
   port: 8095
 spring:
   application:
-    name: hermes-messaging-bridge
+    name: prelo-messaging-bridge
   datasource:
     url: ${BRIDGE_DB_URL:jdbc:postgresql://localhost:5432/bridge}
     username: ${BRIDGE_DB_USER:bridge}
@@ -17,7 +17,7 @@ bridge:
   messaging-core-client-id: ${MESSAGING_CORE_CLIENT_ID:}
   messaging-core-client-secret: ${MESSAGING_CORE_CLIENT_SECRET:}
   callback-signing-secret: ${CALLBACK_SIGNING_SECRET:}
-  hermes-app-url: ${HERMES_APP_URL:}
+  prelo-core-url: ${PRELO_CORE_URL:}
   # Fail closed: both this explicit deployment opt-in and the runtime switch must be enabled.
   auto-reply-enabled: ${BRIDGE_AUTO_REPLY_ENABLED:false}
   admin-token: ${BRIDGE_ADMIN_TOKEN:}
@@ -28,8 +28,8 @@ bridge:
   # Legacy body-only signatures are disabled by default. Enable temporarily only while all
   # callback subscriptions are migrated to contractVersion=2.
   allow-legacy-callback-signatures: ${BRIDGE_ALLOW_LEGACY_CALLBACK_SIGNATURES:false}
-  # HermesAppClient mints its own hermes-go token locally with these — must be the exact same
-  # values as hermes-go's HERMES_GO_API_JWT_SECRET/_ISSUER/_AUDIENCE.
-  hermes-go-api-jwt-secret: ${HERMES_GO_API_JWT_SECRET:}
-  hermes-go-api-jwt-issuer: ${HERMES_GO_API_JWT_ISSUER:messaging-core}
-  hermes-go-api-jwt-audience: ${HERMES_GO_API_JWT_AUDIENCE:messaging-core}
+  # PreloCoreClient mints its own prelo-core token locally with these — must be the exact same
+  # values as prelo-core's PRELO_API_JWT_SECRET/_ISSUER/_AUDIENCE.
+  prelo-core-api-jwt-secret: ${PRELO_API_JWT_SECRET:}
+  prelo-core-api-jwt-issuer: ${PRELO_API_JWT_ISSUER:messaging-core}
+  prelo-core-api-jwt-audience: ${PRELO_API_JWT_AUDIENCE:messaging-core}

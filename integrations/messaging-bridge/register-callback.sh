@@ -6,7 +6,7 @@ set -euo pipefail
 umask 077
 
 CORE_URL="${MESSAGING_CORE_URL:-http://127.0.0.1:8090}"
-BRIDGE_URL="${BRIDGE_URL:?set BRIDGE_URL to this service's publicly reachable base URL, e.g. http://hermes-messaging-bridge:8095}"
+BRIDGE_URL="${BRIDGE_URL:?set BRIDGE_URL to this service's publicly reachable base URL, e.g. http://prelo-messaging-bridge:8095}"
 
 for command in curl jq; do
   command -v "$command" >/dev/null || { echo "missing required command: $command" >&2; exit 1; }
