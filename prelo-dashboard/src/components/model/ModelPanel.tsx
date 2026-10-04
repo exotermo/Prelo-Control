@@ -5,7 +5,9 @@ import {
   getInstanceModel,
   getModelUsage,
   getProjectModel,
+  isCliProvider,
   retestModelConnection,
+  setInstanceModelActive,
   setProjectModelActive,
   type ModelConnection,
   type ModelScope,
@@ -30,6 +32,12 @@ function testLine(c: ModelConnection): string {
   if (!c.lastTestAt) return "ainda não testada";
   const when = new Date(c.lastTestAt).toLocaleString("pt-BR");
   return c.lastTestOk ? `${when} · ${c.lastTestLatencyMs ?? "?"} ms · ok` : `${when} · falhou: ${c.lastTestError ?? "erro"}`;
+}
+
+function callLine(c: ModelConnection): string | null {
+  if (!c.lastCallAt) return null;
+  const when = new Date(c.lastCallAt).toLocaleString("pt-BR");
+  return c.lastCallOk ? `${when} · respondeu` : `${when} · falhou: ${c.lastCallError ?? "erro"}`;
 }
 
 export function ModelPanel({ token, scope: scopeProp, canManage, title }: { token: string; scope: ModelScope; canManage: boolean; title: string }) {
@@ -75,7 +83,9 @@ export function ModelPanel({ token, scope: scopeProp, canManage, title }: { toke
   }, [load]);
 
   const isProject = scope.kind === "project";
-  const effective: ModelConnection | null = usingOwn ? own : isProject && instance?.configured ? instance : null;
+  const effective: ModelConnection | null = usingOwn ? own : isProject && instance?.configured && instance.active ? instance : null;
+  // Instance view: the connection exists but was switched off (Fase X) — still shown, marked off.
+  const instanceOff = !isProject && !!own?.configured && !own.active;
   const inherited = isProject && !usingOwn && !!effective;
   const effectiveScope: ModelScope = inherited ? { kind: "instance" } : scope;
 
@@ -116,8 +126,8 @@ export function ModelPanel({ token, scope: scopeProp, canManage, title }: { toke
           <article className="clipping model-sheet" style={{ "--i": 0 } as React.CSSProperties}>
             <div className="model-sheet-top">
               <span className="clipping-kicker">Ficha técnica · modelo em uso</span>
-              <span className={`clipping-stamp ${effective.lastTestOk === false ? "stamp-bad" : "stamp-ok"}`}>
-                {busy ? "Testando" : effective.lastTestOk === false ? "Com falha" : "Conectado"}
+              <span className={`clipping-stamp ${instanceOff ? "stamp-wait" : failing(effective) ? "stamp-bad" : "stamp-ok"}`}>
+                {busy ? "Testando" : instanceOff ? "Desligado" : failing(effective) ? "Com falha" : "Conectado"}
               </span>
             </div>
             <h3 className="model-name">{effective.model}</h3>
@@ -126,14 +136,27 @@ export function ModelPanel({ token, scope: scopeProp, canManage, title }: { toke
             </span>
             <dl className="fact-list">
               <dt>Provedor</dt><dd className="clipping-mono">{PROVIDERS[effective.provider!].label}</dd>
-              <dt>Endereço</dt><dd className="clipping-mono">{effective.baseUrl}</dd>
-              <dt>Chave</dt>
-              <dd className="clipping-mono key-line">
-                <svg width="14" height="14" viewBox="0 0 24 24" aria-hidden="true" className="icon-stroke lock-icon"><rect x="5" y="11" width="14" height="10" rx="2" /><path d="M8 11V7a4 4 0 0 1 8 0v4" /></svg>
-                {effective.hasKey ? `••••••••${effective.keyLast4 ?? ""} · cifrada no gateway` : "sem chave (serviço local)"}
-              </dd>
+              {isCliProvider(effective.provider) ? (
+                <>
+                  <dt>Acesso</dt><dd className="clipping-mono">sua assinatura, pelo cli-runner do servidor · sem chave</dd>
+                  <dt>Atende</dt><dd className="clipping-mono">só o que você pede — WhatsApp e prospecção usam a API</dd>
+                </>
+              ) : (
+                <>
+                  <dt>Endereço</dt><dd className="clipping-mono">{effective.baseUrl}</dd>
+                  <dt>Chave</dt>
+                  <dd className="clipping-mono key-line">
+                    <svg width="14" height="14" viewBox="0 0 24 24" aria-hidden="true" className="icon-stroke lock-icon"><rect x="5" y="11" width="14" height="10" rx="2" /><path d="M8 11V7a4 4 0 0 1 8 0v4" /></svg>
+                    {effective.hasKey ? `••••••••${effective.keyLast4 ?? ""} · cifrada no gateway` : "sem chave (serviço local)"}
+                  </dd>
+                </>
+              )}
               <dt>Último teste</dt><dd className="clipping-mono">{testLine(effective)}</dd>
+              {callLine(effective) && <><dt>Última chamada</dt><dd className={`clipping-mono${effective.lastCallOk === false ? " call-failed" : ""}`}>{callLine(effective)}</dd></>}
             </dl>
+            {instanceOff && (
+              <p className="wizard-note">Desligado: sem conexão própria, tasks e WhatsApp usam o modelo simulado até você ligar de novo.</p>
+            )}
             <div className="usage-block">
               <div className="usage-head">
                 <strong>Uso {isProject ? "neste projeto" : "na instância"} · 7 dias</strong>
@@ -154,9 +177,14 @@ export function ModelPanel({ token, scope: scopeProp, canManage, title }: { toke
                   {busy ? "Testando…" : "Testar conexão"}
                 </button>
                 {!inherited && <button type="button" onClick={() => setModalOpen(true)}>Trocar modelo</button>}
+                {!isProject && own?.configured && (
+                  <button type="button" disabled={busy} onClick={() => void act(() => setInstanceModelActive(token, !own.active), "Falha ao ligar/desligar.")}>
+                    {own.active ? "Desligar" : "Ligar"}
+                  </button>
+                )}
                 {!inherited && (
                   <button type="button" disabled={busy} onClick={() => {
-                    if (window.confirm("Desconectar e apagar a chave guardada no cofre?")) void act(() => deleteModelConnection(token, scope), "Falha ao desconectar.");
+                    if (window.confirm(isCliProvider(effective.provider) ? "Desconectar esta assinatura?" : "Desconectar e apagar a chave guardada no cofre?")) void act(() => deleteModelConnection(token, scope), "Falha ao desconectar.");
                   }}>Desconectar</button>
                 )}
               </div>
@@ -179,9 +207,9 @@ export function ModelPanel({ token, scope: scopeProp, canManage, title }: { toke
             <button type="button" className={`type-tile${!usingOwn ? " selected" : ""}`} disabled={!canManage || busy} onClick={chooseInstance}>
               <strong>Usar a conexão da instância</strong>
               <span>
-                {instance?.configured
+                {instance?.configured && instance.active
                   ? <>Padrão definido pelo administrador: <span className="mono">{PROVIDERS[instance.provider!].label} · {instance.model}</span></>
-                  : "Nenhum padrão definido ainda."}
+                  : instance?.configured ? "O padrão da instância está desligado." : "Nenhum padrão definido ainda."}
               </span>
             </button>
             <button type="button" className={`type-tile${usingOwn ? " selected" : ""}`} disabled={!canManage || busy} onClick={chooseOwn}>
@@ -208,4 +236,8 @@ export function ModelPanel({ token, scope: scopeProp, canManage, title }: { toke
       )}
     </div>
   );
+}
+
+function failing(c: ModelConnection): boolean {
+  return c.lastTestOk === false || c.lastCallOk === false;
 }

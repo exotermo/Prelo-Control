@@ -735,6 +735,18 @@ button.danger:hover:not(:disabled) { background: #a83826; }
 }
 .link-button:hover:not(:disabled) { background: transparent; color: var(--accent-ink); }
 
+/* Fase X: subscription CLIs in the model wizard / card. */
+.cli-login {
+  display: flex; flex-direction: column; gap: 8px; padding: 14px 16px; border-radius: var(--radius-sm);
+  border: 2px dashed var(--warn); background: var(--warn-bg); color: var(--text-h);
+}
+.cli-login.ok { border-style: solid; border-color: var(--success); background: var(--success-bg); }
+.cli-command {
+  display: block; font-family: var(--mono); font-size: 13px; padding: 10px 12px; border-radius: 8px;
+  background: var(--text-h); color: var(--bg-card); overflow-x: auto; white-space: nowrap; user-select: all;
+}
+.call-failed { color: var(--danger); }
+
 /* ------------------------------------------------------------------------------------------
    "Folhear a revista" — an off-kilter, cut-and-paste zine. Motion only, plus one decoration
    (the tape strip on clippings). Every entrance animation uses fill-mode `backwards`, so once it

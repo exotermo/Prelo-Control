@@ -506,7 +506,10 @@ export function removeProjectMember(token: string, projectId: string, userId: st
 // --- model connections (Fase M): provider keys live sealed in the llm-gateway vault; prelo-core
 // only relays. Nothing here ever receives a key back — only hasKey / keyLast4. ---
 
-export type ModelProvider = "anthropic" | "openai" | "openai_compatible";
+// claude_cli / codex_cli (Fase X): the owner's own Claude Code / Codex subscriptions, run by
+// cli-runner — no key; they only answer work a human started (never WhatsApp or prospecting).
+export type ModelProvider = "anthropic" | "openai" | "openai_compatible" | "claude_cli" | "codex_cli";
+export const isCliProvider = (p: ModelProvider | null | undefined) => p === "claude_cli" || p === "codex_cli";
 
 export interface ModelConnection {
   configured: boolean;
@@ -523,6 +526,15 @@ export interface ModelConnection {
   lastTestLatencyMs: number | null;
   lastTestError: string | null;
   updatedAt: string | null;
+  // Outcome of the last real call (Fase X) — a key can pass the test and still fail to answer.
+  lastCallAt: string | null;
+  lastCallOk: boolean | null;
+  lastCallError: string | null;
+}
+
+export interface CliStatus { available: boolean; claudeLoggedIn: boolean; claudeLogin: string | null; codexLoggedIn: boolean; codexLogin: string | null }
+export function getCliStatus(token: string): Promise<CliStatus> {
+  return request<CliStatus>("/api/v1/model-connections/cli-status", { method: "GET" }, token);
 }
 
 export interface ProjectModelView { own: ModelConnection; instance: ModelConnection; usingOwn: boolean }
@@ -559,6 +571,9 @@ export function deleteModelConnection(token: string, scope: ModelScope): Promise
 }
 export function setProjectModelActive(token: string, projectId: string, active: boolean): Promise<ModelConnection> {
   return request<ModelConnection>(`/api/v1/projects/${projectId}/model/active`, jsonInit("PUT", { active }), token);
+}
+export function setInstanceModelActive(token: string, active: boolean): Promise<ModelConnection> {
+  return request<ModelConnection>("/api/v1/model-connections/instance/active", jsonInit("PUT", { active }), token);
 }
 export function getModelUsage(token: string, scope: ModelScope, days = 7): Promise<ModelUsageDay[]> {
   const path = scope.kind === "instance" ? "/api/v1/model-connections/usage" : `/api/v1/projects/${scope.projectId}/model/usage`;
