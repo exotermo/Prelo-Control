@@ -4,7 +4,7 @@ import { mkdtemp, mkdir, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
-  buildPrompt, codexModels, claudeArgs, codexArgs, codexPrompt, createServer, limiter, parseClaude, parseCodex,
+  buildPrompt, codexModels, decideReply, TOOL_SCHEMA, claudeArgs, codexArgs, codexPrompt, createServer, limiter, parseClaude, parseCodex,
   runOnce, RunnerError, systemOf, validateRun,
 } from "./server.mjs";
 
@@ -53,7 +53,7 @@ test("codex runs read-only, ephemeral, without shell/browser/apps and without us
 test("claude output: success, plan limit and logged-out are told apart", () => {
   const ok = parseClaude(JSON.stringify({ type: "result", subtype: "success", is_error: false, result: "olá",
     usage: { input_tokens: 10, cache_read_input_tokens: 5, output_tokens: 3 }, modelUsage: { "claude-sonnet-4-6": {} } }), "", 0, "sonnet");
-  assert.deepEqual(ok, { text: "olá", model: "claude-sonnet-4-6", inputTokens: 15, outputTokens: 3 });
+  assert.deepEqual(ok, { text: "olá", structured: null, model: "claude-sonnet-4-6", inputTokens: 15, outputTokens: 3 });
   assert.throws(() => parseClaude(JSON.stringify({ subtype: "success", is_error: true, result: "Claude AI usage limit reached|1700000000" }), "", 1),
     (e) => e.code === "rate_limited" && e.status === 429);
   assert.throws(() => parseClaude(JSON.stringify({ subtype: "success", is_error: true, result: "Invalid API key · Please run /login" }), "", 1),
@@ -144,4 +144,31 @@ test("codex models come from the CLI cache: listed only, by priority", async () 
   ] }));
   assert.deepEqual((await codexModels(home)).map((m) => m.id), ["a", "b"]);
   assert.deepEqual(await codexModels("/nao/existe"), []);
+});
+
+test("tools mode: catalog + labelled tool turns in the prompt, structured flags on both CLIs", () => {
+  const tools = [{ name: "current_time", description: "hora UTC", inputSchema: { type: "object", properties: {} } }];
+  const prompt = buildPrompt([
+    { role: "system", content: "s" }, { role: "user", content: "que horas são?" },
+    { role: "assistant", content: "", toolName: "current_time", toolArgsJson: "{}" },
+    { role: "tool", content: "2026-10-04T10:00:00Z", toolName: "current_time" },
+  ], tools);
+  assert.match(prompt, /- current_time: hora UTC/);
+  assert.match(prompt, /Assistente pediu a ferramenta current_time com argumentos \{\}/);
+  assert.match(prompt, /Resultado da ferramenta current_time:\n2026-10-04T10:00:00Z/);
+  const c = claudeArgs({ tools }, "");
+  assert.equal(c[c.indexOf("--json-schema") + 1], JSON.stringify(TOOL_SCHEMA));
+  const x = codexArgs({ tools }, "/w", "/w/l", "/w/s.json");
+  assert.equal(x[x.indexOf("--output-schema") + 1], "/w/s.json");
+  assert.ok(!claudeArgs({ tools: [] }, "").includes("--json-schema"));
+});
+
+test("structured replies become a tool request only for offered tools with valid JSON args", () => {
+  const tools = [{ name: "current_time", description: "x" }];
+  assert.deepEqual(decideReply('{"action":"tool","tool":"current_time","arguments":"{ }","text":""}', tools),
+    { kind: "tool", toolName: "current_time", toolArgsJson: "{}", text: "" });
+  assert.deepEqual(decideReply({ action: "tool", tool: "rm_rf", arguments: "{}", text: "" }, tools), { kind: "final", text: "" });
+  assert.equal(decideReply({ action: "tool", tool: "current_time", arguments: "nao-json", text: "" }, tools).toolArgsJson, "{}");
+  assert.deepEqual(decideReply({ action: "final", text: "são 10h", tool: "", arguments: "" }, tools), { kind: "final", text: "são 10h" });
+  assert.deepEqual(decideReply("texto solto", tools), { kind: "final", text: "texto solto" });
 });

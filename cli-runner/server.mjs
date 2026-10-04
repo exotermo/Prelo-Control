@@ -4,7 +4,7 @@
 // empty temporary directory, with every built-in tool disabled — they answer, they never act.
 import http from "node:http";
 import { spawn } from "node:child_process";
-import { mkdtemp, readFile, rm, stat } from "node:fs/promises";
+import { mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir, homedir } from "node:os";
 import { join } from "node:path";
 import { timingSafeEqual } from "node:crypto";
@@ -32,13 +32,53 @@ export class RunnerError extends Error {
   }
 }
 
+function turnText(m) {
+  if (m.role === "assistant" && m.toolName) return `Assistente pediu a ferramenta ${m.toolName} com argumentos ${m.toolArgsJson || "{}"}`;
+  if (m.role === "tool") return `Resultado da ferramenta ${m.toolName ?? ""}:\n${m.content}`;
+  const label = { user: "Usuário", assistant: "Assistente" };
+  return `${label[m.role] ?? m.role}:\n${m.content}`;
+}
+
 /** Flattens the gateway's conversation into one prompt the CLIs can take on stdin. */
-export function buildPrompt(messages) {
+export function buildPrompt(messages, tools = []) {
   const turns = messages.filter((m) => m.role !== "system");
-  if (turns.length === 1 && turns[0].role === "user") return turns[0].content;
-  const label = { user: "Usuário", assistant: "Assistente", tool: "Resultado de ferramenta" };
-  const transcript = turns.map((m) => `${label[m.role] ?? m.role}:\n${m.content}`).join("\n\n");
-  return `${transcript}\n\nResponda como Assistente à última mensagem acima.`;
+  if (tools.length === 0 && turns.length === 1 && turns[0].role === "user") return turns[0].content;
+  const transcript = turns.map(turnText).join("\n\n");
+  if (tools.length === 0) return `${transcript}\n\nResponda como Assistente à última mensagem acima.`;
+  const catalog = tools.map((t) => `- ${t.name}: ${t.description}\n  argumentos (JSON Schema): ${JSON.stringify(t.inputSchema ?? { type: "object" })}`).join("\n");
+  return `Você pode usar estas ferramentas (uma por vez):\n${catalog}\n\n`
+    + "Responda SEMPRE no formato estruturado pedido:\n"
+    + '- para usar uma ferramenta: action="tool", tool=<nome exato>, arguments=<objeto JSON dos argumentos, como texto>, text=""\n'
+    + '- para responder ao usuário: action="final", text=<resposta>, tool="", arguments=""\n'
+    + "Use uma ferramenta só quando precisar de informação ou ação que ela entrega; depois do resultado, continue.\n\n"
+    + `Conversa até agora:\n\n${transcript}`;
+}
+
+// Structured reply when tools are offered (OpenAI-strict friendly: every field required, arguments as text).
+export const TOOL_SCHEMA = {
+  type: "object",
+  properties: {
+    action: { type: "string", enum: ["final", "tool"] },
+    text: { type: "string" },
+    tool: { type: "string" },
+    arguments: { type: "string" },
+  },
+  required: ["action", "text", "tool", "arguments"],
+  additionalProperties: false,
+};
+
+/** Turns the structured reply into the gateway's shape: a final answer or one tool request. */
+export function decideReply(raw, tools) {
+  let parsed = raw;
+  if (typeof raw === "string") {
+    try { parsed = JSON.parse(raw); } catch { return { kind: "final", text: raw }; }
+  }
+  if (parsed?.action === "tool" && tools.some((t) => t.name === parsed.tool)) {
+    let args = parsed.arguments || "{}";
+    try { args = JSON.stringify(JSON.parse(args)); } catch { args = "{}"; }
+    return { kind: "tool", toolName: parsed.tool, toolArgsJson: args, text: "" };
+  }
+  return { kind: "final", text: parsed?.text ?? "" };
 }
 
 export function systemOf(messages) {
@@ -57,13 +97,18 @@ export function validateRun(body) {
       throw new RunnerError("bad_request", 400, "invalid message");
     }
   }
-  if (!body.messages.some((m) => m.role !== "system" && m.content.trim() !== "")) {
+  const tools = Array.isArray(body.tools) ? body.tools : [];
+  if (tools.length > 32 || tools.some((t) => !t || typeof t.name !== "string" || !/^[a-z0-9_]{1,64}$/.test(t.name) || typeof t.description !== "string")) {
+    throw new RunnerError("bad_request", 400, "invalid tools");
+  }
+  if (!body.messages.some((m) => m.role !== "system" && (m.content.trim() !== "" || m.toolName))) {
     throw new RunnerError("bad_request", 400, "the conversation has no message to answer");
   }
   return {
     engine: body.engine,
     model: body.model && body.model !== "default" ? body.model : null,
     messages: body.messages,
+    tools,
     timeoutMs: Number.isFinite(body.timeoutMs) ? Math.min(Math.max(body.timeoutMs, 5000), 600000) : null,
   };
 }
@@ -77,16 +122,18 @@ const CODEX_DISABLED_FEATURES = [
 export function claudeArgs(run, system) {
   const args = ["-p", "--output-format", "json", "--tools", "", "--strict-mcp-config", "--setting-sources", "",
     "--no-session-persistence"];
+  if (run.tools?.length) args.push("--json-schema", JSON.stringify(TOOL_SCHEMA));
   if (system) args.push("--system-prompt", system);
   if (run.model) args.push("--model", run.model);
   return args;
 }
 
-export function codexArgs(run, workdir, lastMessageFile) {
+export function codexArgs(run, workdir, lastMessageFile, schemaFile = null) {
   const args = ["exec", "--json", "--ephemeral", "--skip-git-repo-check", "--ignore-user-config",
     "--sandbox", "read-only", "-C", workdir, "-o", lastMessageFile, "-c", 'web_search="disabled"'];
   for (const feature of CODEX_DISABLED_FEATURES) args.push("-c", `features.${feature}=false`);
   if (run.model) args.push("-m", run.model);
+  if (schemaFile) args.push("--output-schema", schemaFile);
   args.push("-");
   return args;
 }
@@ -124,6 +171,7 @@ export function parseClaude(stdout, stderr, exitCode, requestedModel) {
   const models = Object.keys(out.modelUsage ?? {});
   return {
     text: out.result ?? "",
+    structured: out.structured_output ?? null,
     model: models[0] ?? requestedModel ?? "claude-default",
     inputTokens: (out.usage?.input_tokens ?? 0) + (out.usage?.cache_read_input_tokens ?? 0) + (out.usage?.cache_creation_input_tokens ?? 0),
     outputTokens: out.usage?.output_tokens ?? 0,
@@ -192,7 +240,8 @@ export async function runOnce(cfg, run, exec = execute) {
   const timeoutMs = run.timeoutMs ?? cfg.timeoutMs;
   try {
     const system = systemOf(run.messages);
-    const prompt = buildPrompt(run.messages);
+    const tools = run.tools ?? [];
+    const prompt = buildPrompt(run.messages, tools);
     let result;
     if (run.engine === "claude") {
       const { stdout, stderr, code } = await exec(cfg.claudeBin, claudeArgs(run, system),
@@ -200,7 +249,12 @@ export async function runOnce(cfg, run, exec = execute) {
       result = parseClaude(stdout, stderr, code, run.model);
     } else {
       const lastFile = join(workdir, ".last-message");
-      const { stdout, stderr, code } = await exec(cfg.codexBin, codexArgs(run, workdir, lastFile),
+      let schemaFile = null;
+      if (tools.length) {
+        schemaFile = join(workdir, ".schema.json");
+        await writeFile(schemaFile, JSON.stringify(TOOL_SCHEMA));
+      }
+      const { stdout, stderr, code } = await exec(cfg.codexBin, codexArgs(run, workdir, lastFile, schemaFile),
         { cwd: workdir, input: codexPrompt(system, prompt), env: childEnv(cfg), timeoutMs });
       let last = null;
       try { last = await readFile(lastFile, "utf8"); } catch { /* no final message */ }
@@ -208,6 +262,13 @@ export async function runOnce(cfg, run, exec = execute) {
       const resolved = run.model ?? (await codexModels(cfg.home))[0]?.id ?? null;
       result = parseCodex(stdout, stderr, code, last, resolved);
     }
+    if (tools.length) {
+      const reply = decideReply(result.structured ?? result.text, tools);
+      result = { ...result, ...reply };
+    } else {
+      result = { ...result, kind: "final" };
+    }
+    delete result.structured;
     return { ...result, engine: run.engine, durationMs: Date.now() - started };
   } finally {
     await rm(workdir, { recursive: true, force: true });
