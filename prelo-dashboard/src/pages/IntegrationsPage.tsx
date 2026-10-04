@@ -30,6 +30,8 @@ const SCOPE_LABEL: Record<string, string> = {
   "tasks:read": "lê tasks",
   "tasks:execute": "executa tasks",
   "observability:read": "vê turnos",
+  "actions:request": "pede autorização",
+  "actions:report": "informa resultado",
 };
 
 function ApiKeyClipping({ apiKey, now, index, onRevoke }: { apiKey: ApiKeySummary; now: number; index: number; onRevoke: () => void }) {

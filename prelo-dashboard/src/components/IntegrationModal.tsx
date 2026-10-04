@@ -17,6 +17,8 @@ const SCOPES: { id: ApiKeyScope; label: string; defaultOn: boolean }[] = [
   { id: "tasks:read", label: "Ler tasks e resultados", defaultOn: true },
   { id: "tasks:execute", label: "Executar tasks", defaultOn: false },
   { id: "observability:read", label: "Ver turnos e árvore de delegação", defaultOn: false },
+  { id: "actions:request", label: "Pedir autorização de ações (ex.: deploy pelo BastionDeploy)", defaultOn: false },
+  { id: "actions:report", label: "Informar o resultado dessas ações", defaultOn: false },
 ];
 
 const EVENTS: { id: WebhookEvent; label: string; defaultOn: boolean }[] = [
@@ -24,6 +26,7 @@ const EVENTS: { id: WebhookEvent; label: string; defaultOn: boolean }[] = [
   { id: "task.failed", label: "Task falhou", defaultOn: true },
   { id: "approval.pending", label: "Aprovação pendente", defaultOn: true },
   { id: "server.offline", label: "Servidor ficou offline", defaultOn: false },
+  { id: "action.decided", label: "Ação externa decidida (aprovada, negada ou expirada)", defaultOn: false },
 ];
 
 interface Created {

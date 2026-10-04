@@ -294,6 +294,36 @@ export interface DashboardUserSummary {
   createdAt: string;
 }
 
+// --- PR-1/PR-2: who am I, and app sessions (Work Control) per device ---
+
+export interface Me {
+  userId: string;
+  email: string;
+  role: "ADMIN" | "OPERATOR";
+  scopes: string[];
+  workspaceId: string;
+  workspaceName: string;
+  projects: { id: string; name: string; clientId: string | null }[];
+  session: { kind: "web" | "mobile"; deviceId: string | null; deviceName: string | null };
+}
+export function getMe(token: string): Promise<Me> {
+  return request<Me>("/api/v1/me", { method: "GET" }, token);
+}
+
+export interface AppSession { id: string; deviceName: string; platform: string; createdAt: string; lastUsedAt: string; expiresAt: string; current: boolean }
+export function listMySessions(token: string): Promise<AppSession[]> {
+  return request<AppSession[]>("/api/v1/me/sessions", { method: "GET" }, token);
+}
+export function revokeMySession(token: string, sessionId: string): Promise<void> {
+  return request<void>(`/api/v1/me/sessions/${sessionId}`, { method: "DELETE" }, token);
+}
+export function listUserSessions(token: string, userId: string): Promise<AppSession[]> {
+  return request<AppSession[]>(`/api/v1/users/${userId}/sessions`, { method: "GET" }, token);
+}
+export function revokeUserSessions(token: string, userId: string): Promise<{ revoked: number }> {
+  return request<{ revoked: number }>(`/api/v1/users/${userId}/sessions`, { method: "DELETE" }, token);
+}
+
 export function listDashboardUsers(token: string): Promise<DashboardUserSummary[]> {
   return request<DashboardUserSummary[]>("/api/v1/users", { method: "GET" }, token);
 }
@@ -585,8 +615,30 @@ export function getModelUsage(token: string, scope: ModelScope, days = 7): Promi
 // --- integrations (Fase I): per-project API keys + outbound webhooks, ADMIN only
 // (integrations:manage). The raw key / signing secret come back exactly once, on creation. ---
 
-export type ApiKeyScope = "tasks:create" | "tasks:read" | "tasks:execute" | "observability:read";
-export type WebhookEvent = "task.completed" | "task.failed" | "approval.pending" | "server.offline";
+export type ApiKeyScope = "tasks:create" | "tasks:read" | "tasks:execute" | "observability:read" | "actions:request" | "actions:report";
+export type WebhookEvent = "task.completed" | "task.failed" | "approval.pending" | "server.offline" | "action.decided";
+
+// --- PR-3: external action requests (deploys from the BastionDeploy) ---
+export interface ActionRequestView {
+  id: string;
+  projectId: string;
+  kind: "deploy";
+  payload: { repository: string; commitSha: string; environment: string; target: string; app: string; deployRequestId: string };
+  payloadHash: string;
+  risk: string;
+  impact: string;
+  requestedBy: string;
+  status: "PENDING" | "APPROVED" | "DENIED" | "EXPIRED";
+  approvalCode: string;
+  expiresAt: string;
+  decidedAt: string | null;
+  decidedBy: string | null;
+  result: { status: string; sequence: number; message: string | null; url: string | null; artifactDigest: string | null; reportedAt: string } | null;
+  createdAt: string;
+}
+export function listProjectActions(token: string, projectId: string, kind = "deploy"): Promise<ActionRequestView[]> {
+  return request<ActionRequestView[]>(`/api/v1/projects/${projectId}/actions?kind=${kind}`, { method: "GET" }, token);
+}
 
 export interface ApiKeySummary {
   id: string;

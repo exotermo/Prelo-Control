@@ -9,6 +9,7 @@ import { ServersPage } from "./pages/ServersPage";
 import { LoginPage } from "./pages/LoginPage";
 import { ProjectLanding } from "./pages/ProjectLanding";
 import { ClientsPage } from "./pages/ClientsPage";
+import { AccountPage } from "./pages/AccountPage";
 import { CommandPalette } from "./components/search/CommandPalette";
 import { openCommandPalette } from "./components/search/paletteEvents";
 import { QuickViewProvider } from "./context/QuickViewContext";
@@ -148,15 +149,16 @@ function Gate() {
   const inProjects = parseProjectsPath(path) !== null;
   // /clientes/** (Fase C1) is a workspace screen too, like /projetos — no project needed.
   const inClients = parseClientsPath(path) !== null;
+  const inAccount = path === "/conta";
   useEffect(() => {
-    if (!restoring && token && !projectId && !inProjects && !inClients) navigate("/projetos", { replace: true });
-  }, [restoring, token, projectId, inProjects, inClients]);
+    if (!restoring && token && !projectId && !inProjects && !inClients && !inAccount) navigate("/projetos", { replace: true });
+  }, [restoring, token, projectId, inProjects, inClients, inAccount]);
   if (restoring) return null;
   if (!token) return <LoginPage />;
   return (
     <QuickViewProvider>
       <CommandPalette token={token} />
-      {inClients ? <ClientsPage /> : !projectId || inProjects ? <ProjectLanding /> : <Shell />}
+      {inAccount ? <AccountPage /> : inClients ? <ClientsPage /> : !projectId || inProjects ? <ProjectLanding /> : <Shell />}
     </QuickViewProvider>
   );
 }

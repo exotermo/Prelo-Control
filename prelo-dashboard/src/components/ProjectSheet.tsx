@@ -1,3 +1,4 @@
+import { DeploysPanel } from "./DeploysPanel";
 import { useEffect, useState, type CSSProperties } from "react";
 import {
   decodeDashboardToken,
@@ -96,6 +97,7 @@ export function ProjectSheet({ token, project, section, onSection, onBack, onEnt
       </nav>
 
       <div key={section} className="page-sheet forward">
+        {section === "visao-geral" && <DeploysPanel token={token} projectId={project.id} />}
         {section === "visao-geral" && (
           <div className="clipping-grid overview-grid">
             {clips.map((c, index) => (

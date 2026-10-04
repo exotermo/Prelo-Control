@@ -5,6 +5,7 @@ import { openCommandPalette } from "./search/paletteEvents";
 const LINKS = [
   { path: "/projetos", label: "Início" },
   { path: "/clientes", label: "Clientes" },
+  { path: "/conta", label: "Conta" },
 ];
 
 /** Header of the workspace screens (/projetos and /clientes), before entering a project. */

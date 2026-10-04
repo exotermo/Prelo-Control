@@ -1,6 +1,7 @@
 import { useEffect, useState, type FormEvent } from "react";
 import {
   ApiError,
+  revokeUserSessions,
   changeDashboardUserRole,
   decodeDashboardToken,
   inviteDashboardUser,
@@ -61,6 +62,16 @@ export function UsersPage() {
     }
   }
 
+  async function endAppSessions(userId: string, email: string) {
+    if (!token || !window.confirm(`Encerrar todas as sessões do app de ${email}? O app pedirá login de novo.`)) return;
+    try {
+      const { revoked } = await revokeUserSessions(token, userId);
+      window.alert(revoked ? `${revoked} sessão(ões) encerrada(s).` : "Nenhuma sessão ativa no app.");
+    } catch {
+      window.alert("Não foi possível encerrar as sessões.");
+    }
+  }
+
   async function handleRoleChange(userId: string, nextRole: DashboardRole) {
     if (!token) return;
     setChangingId(userId);
@@ -118,6 +129,7 @@ export function UsersPage() {
               <th>Papel</th>
               <th>Status</th>
               <th>Convidado em</th>
+              <th>App</th>
             </tr>
           </thead>
           <tbody>
@@ -150,6 +162,11 @@ export function UsersPage() {
                     {isSelf && <span className="muted" style={{ marginLeft: 8, fontSize: 12 }}>(você)</span>}
                   </td>
                   <td className="muted">{new Date(u.createdAt).toLocaleString()}</td>
+                  <td>
+                    <button className="link-button small-link" onClick={() => void endAppSessions(u.id, u.email)}>
+                      Encerrar sessões do app
+                    </button>
+                  </td>
                 </tr>
               );
             })}

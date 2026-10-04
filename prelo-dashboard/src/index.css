@@ -751,6 +751,15 @@ button.danger:hover:not(:disabled) { background: #a83826; }
 .approval-code { margin-left: 10px; font-size: 13px; vertical-align: middle; }
 .approval-whatsapp { font-size: 13px; margin: 6px 0 10px; }
 
+/* PR-1/PR-2: account page. */
+.account-facts { max-width: 640px; margin-bottom: 28px; }
+.small-link { font-family: var(--sans); font-size: 13px; }
+
+/* PR-3: deploys on the project cover. */
+.deploys-panel { margin-bottom: 28px; }
+.deploy-row { cursor: default; }
+.deploy-row:hover:not(:disabled) { background: transparent; }
+
 /* ------------------------------------------------------------------------------------------
    "Folhear a revista" — an off-kilter, cut-and-paste zine. Motion only, plus one decoration
    (the tape strip on clippings). Every entrance animation uses fill-mode `backwards`, so once it
