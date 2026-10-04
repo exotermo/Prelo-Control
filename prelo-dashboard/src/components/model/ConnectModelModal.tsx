@@ -211,7 +211,7 @@ export function ConnectModelModal({
               {isCli ? (
                 <>
                   <div className="model-list">
-                    {CLI_MODELS[provider].map((m) => (
+                    {[...CLI_MODELS[provider], ...models.filter((id) => !CLI_MODELS[provider].some((m) => m.id === id)).map((id) => ({ id, note: "disponível na sua conta" }))].map((m) => (
                       <button key={m.id} type="button" className={`type-tile model-option${!manualModel.trim() && model === m.id ? " selected" : ""}`}
                         onClick={() => { setModel(m.id); setManualModel(""); }}>
                         <strong className="mono">{m.id}</strong>

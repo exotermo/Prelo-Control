@@ -221,6 +221,9 @@ export function TaskDetail({ taskId, onTaskChanged }: { taskId: string; onTaskCh
       {execution && (
         <>
           <h3 style={{ marginTop: 24 }}>Execução {statusBadge(execution.status)}</h3>
+          {(execution.provider || execution.model) && (
+            <p className="mono muted">respondido por {execution.provider ?? "?"} · {execution.model ?? "?"}</p>
+          )}
           {execution.result && <pre className="mono">{execution.result}</pre>}
           {execution.error && <p className="error">{execution.error}</p>}
         </>

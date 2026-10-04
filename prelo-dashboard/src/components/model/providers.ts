@@ -21,5 +21,5 @@ export const CLI_MODELS: Record<string, { id: string; note: string }[]> = {
     { id: "haiku", note: "mais rápido, gasta menos cota" },
     { id: "opus", note: "mais capaz, gasta mais cota" },
   ],
-  codex_cli: [{ id: "default", note: "o modelo padrão da sua conta Codex" }],
+  codex_cli: [{ id: "default", note: "o padrão da sua conta (o primeiro da lista abaixo)" }],
 };
