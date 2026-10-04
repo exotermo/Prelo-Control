@@ -34,9 +34,9 @@ public record LLMRequest(@NotBlank String modelProfile,
 
     public record Parameters(Double temperature, @Positive Integer maxTokens) { }
 
-    // Deliberately minimal for this slice (name + description only, no JSON schema for args) —
-    // enough for MockProvider to offer a tool deterministically. A real provider's tool-use
-    // format (e.g. Anthropic's input_schema) is wired when the real provider is turned on, not
-    // here.
-    public record ToolSpec(@NotBlank String name, @NotBlank String description) { }
+    // inputSchema (Fase T) is the tool's JSON Schema for its arguments — what real providers need
+    // to call it (Anthropic input_schema, OpenAI function.parameters). Absent = no arguments.
+    public record ToolSpec(@NotBlank String name, @NotBlank String description, com.fasterxml.jackson.databind.JsonNode inputSchema) {
+        public ToolSpec(String name, String description) { this(name, description, null); }
+    }
 }

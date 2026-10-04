@@ -20,7 +20,7 @@ public class MockProvider implements LLMProvider {
     @Override public LLMResponse execute(String model, LLMRequest request) {
         java.util.List<LLMMessage> messages = request.messages();
         LLMMessage last = messages.get(messages.size() - 1);
-        boolean alreadyHasToolResult = last.content().startsWith(TOOL_RESULT_PREFIX);
+        boolean alreadyHasToolResult = "tool".equals(last.role()) || last.content().startsWith(TOOL_RESULT_PREFIX);
 
         if (!request.tools().isEmpty() && !alreadyHasToolResult) {
             LLMRequest.ToolSpec tool = request.tools().get(0);
@@ -29,7 +29,8 @@ public class MockProvider implements LLMProvider {
                 new LLMResponse.Usage(0, 0, 0), 0, null, java.util.List.of());
         }
 
-        String lastUserContent = messages.stream().filter(message -> message.role().equals("user")).reduce((first, second) -> second).map(LLMMessage::content).orElse("No user message supplied.");
+        String lastUserContent = messages.stream().filter(message -> message.role().equals("user") || message.role().equals("tool"))
+            .reduce((first, second) -> second).map(LLMMessage::content).orElse("No user message supplied.");
         String content = "[mock] " + lastUserContent;
         int input = messages.stream().mapToInt(message -> message.content().length() / 4).sum();
         int output = content.length() / 4;

@@ -68,4 +68,64 @@ class ProviderWireClientTest {
         var error = assertThrows(ProviderAuthenticationException.class, () -> client.listModels("anthropic", base, "sk-ant-x", Duration.ofSeconds(5)));
         assertFalse(error.getMessage().contains("sk-ant-x"));
     }
+
+    // --- Fase T: tool calling ---
+
+    private static final com.fasterxml.jackson.databind.JsonNode SCHEMA;
+    static {
+        try {
+            SCHEMA = new ObjectMapper().readTree("{\"type\":\"object\",\"properties\":{\"url\":{\"type\":\"string\"}},\"required\":[\"url\"]}");
+        } catch (IOException e) { throw new IllegalStateException(e); }
+    }
+    private static final LLMRequest TOOL_REQUEST = new LLMRequest("general-chat", List.of(
+        new LLMMessage("system", "s"), new LLMMessage("user", "veja o site"),
+        new LLMMessage("assistant", "", "call_1", "inspect_website", "{\"url\":\"https://x.test\"}"),
+        new LLMMessage("tool", "responde 200", "call_1", "inspect_website", null),
+        new LLMMessage("user", "e agora?")),
+        null, null, List.of(new LLMRequest.ToolSpec("inspect_website", "inspeciona", SCHEMA), new LLMRequest.ToolSpec("current_time", "hora")));
+
+    @Test void anthropicGetsToolsAndToolTurnsAndAnswersWithAToolUse() throws Exception {
+        String base = serve("/v1/messages", 200, "{\"model\":\"claude-x\",\"stop_reason\":\"tool_use\",\"content\":["
+            + "{\"type\":\"text\",\"text\":\"vou ver\"},{\"type\":\"tool_use\",\"id\":\"toolu_9\",\"name\":\"current_time\",\"input\":{}}],"
+            + "\"usage\":{\"input_tokens\":5,\"output_tokens\":2}}");
+        var response = client.chat("anthropic", base, "sk-ant-x", "claude-x", TOOL_REQUEST, 256, Duration.ofSeconds(5));
+        assertEquals("TOOL_USE", response.kind());
+        assertEquals("toolu_9", response.toolUseId());
+        assertEquals("current_time", response.toolName());
+        assertEquals("{}", response.toolArgsJson());
+        var body = new ObjectMapper().readTree(seen.get("body"));
+        assertEquals("inspect_website", body.path("tools").path(0).path("name").asText());
+        assertEquals("url", body.path("tools").path(0).path("input_schema").path("required").path(0).asText());
+        assertEquals("object", body.path("tools").path(1).path("input_schema").path("type").asText(), "no schema = empty object schema");
+        var messages = body.path("messages");
+        assertEquals("tool_use", messages.path(1).path("content").path(0).path("type").asText());
+        assertEquals("https://x.test", messages.path(1).path("content").path(0).path("input").path("url").asText());
+        assertEquals("user", messages.path(2).path("role").asText());
+        assertEquals("tool_result", messages.path(2).path("content").path(0).path("type").asText());
+        assertEquals("text", messages.path(2).path("content").path(1).path("type").asText(), "consecutive user turns are merged");
+    }
+
+    @Test void openAiGetsFunctionsAndToolMessagesAndAnswersWithAToolCall() throws Exception {
+        String base = serve("/chat/completions", 200, "{\"model\":\"gpt-x\",\"choices\":[{\"message\":{\"role\":\"assistant\",\"content\":null,"
+            + "\"tool_calls\":[{\"id\":\"call_7\",\"type\":\"function\",\"function\":{\"name\":\"inspect_website\",\"arguments\":\"{\\\"url\\\":\\\"https://y.test\\\"}\"}}]}}],"
+            + "\"usage\":{\"prompt_tokens\":3,\"completion_tokens\":1}}");
+        var response = client.chat("openai", base, "sk-1", "gpt-x", TOOL_REQUEST, 256, Duration.ofSeconds(5));
+        assertEquals("TOOL_USE", response.kind());
+        assertEquals("call_7", response.toolUseId());
+        assertEquals("{\"url\":\"https://y.test\"}", response.toolArgsJson());
+        var body = new ObjectMapper().readTree(seen.get("body"));
+        assertTrue(body.has("max_completion_tokens") && !body.has("max_tokens"), "OpenAI needs max_completion_tokens");
+        assertEquals("function", body.path("tools").path(0).path("type").asText());
+        assertEquals("inspect_website", body.path("tools").path(0).path("function").path("name").asText());
+        assertEquals("call_1", body.path("messages").path(2).path("tool_calls").path(0).path("id").asText());
+        assertEquals("tool", body.path("messages").path(3).path("role").asText());
+        assertEquals("call_1", body.path("messages").path(3).path("tool_call_id").asText());
+    }
+
+    @Test void aToolTheRequestDidNotOfferIsNeverReturnedAsAToolCall() throws Exception {
+        String base = serve("/chat/completions", 200, "{\"choices\":[{\"message\":{\"content\":\"texto\",\"tool_calls\":[{\"id\":\"c\",\"function\":{\"name\":\"rm_rf\",\"arguments\":\"{}\"}}]}}]}");
+        var response = client.chat("openai_compatible", base, null, "m", TOOL_REQUEST, 256, Duration.ofSeconds(5));
+        assertEquals("FINAL", response.kind());
+        assertTrue(new ObjectMapper().readTree(seen.get("body")).has("max_tokens"), "compatible services keep max_tokens");
+    }
 }

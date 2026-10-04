@@ -25,8 +25,9 @@ import java.util.stream.Collectors;
  * Talks to a provider with a key supplied per call (decrypted from the vault just for this call),
  * in either wire format: Anthropic Messages API, or OpenAI Chat Completions (OpenAI itself and
  * every OpenAI-compatible service). Error mapping matches AnthropicProvider: by status class only,
- * never echoing upstream bodies or headers. Tool calls are not translated yet — real providers
- * answer FINAL (same limitation as AnthropicProvider, see ADR-014).
+ * never echoing upstream bodies or headers. Tool calls (Fase T) are translated both ways: the
+ * provider-neutral LLMMessage tool fields become Anthropic tool_use/tool_result blocks or OpenAI
+ * tool_calls/role:tool messages, and the provider's first tool call comes back as KIND_TOOL_USE.
  */
 class ProviderWireClient {
     private static final String ANTHROPIC_VERSION = "2023-06-01";
@@ -56,7 +57,7 @@ class ProviderWireClient {
 
     LLMResponse chat(String provider, String baseUrl, String apiKey, String model, LLMRequest request, int defaultMaxTokens, Duration timeout) {
         Instant started = Instant.now();
-        ObjectNode payload = isAnthropic(provider) ? anthropicPayload(model, request, defaultMaxTokens) : openAiPayload(model, request, defaultMaxTokens);
+        ObjectNode payload = isAnthropic(provider) ? anthropicPayload(model, request, defaultMaxTokens) : openAiPayload(provider, model, request, defaultMaxTokens);
         HttpRequest.Builder builder;
         try {
             builder = HttpRequest.newBuilder(URI.create(baseUrl + (isAnthropic(provider) ? "/v1/messages" : "/chat/completions")))
@@ -72,22 +73,65 @@ class ProviderWireClient {
         String text;
         int input;
         int output;
+        String toolId = null;
+        String toolName = null;
+        String toolArgs = null;
         if (isAnthropic(provider)) {
             List<String> parts = new ArrayList<>();
             for (JsonNode block : body.path("content")) {
-                if ("text".equals(block.path("type").asText())) parts.add(block.path("text").asText(""));
+                String type = block.path("type").asText();
+                if ("text".equals(type)) parts.add(block.path("text").asText(""));
+                if ("tool_use".equals(type) && toolName == null) {
+                    toolId = block.path("id").asText();
+                    toolName = block.path("name").asText();
+                    toolArgs = block.path("input").isMissingNode() ? "{}" : block.path("input").toString();
+                }
             }
             text = String.join("", parts);
             input = body.path("usage").path("input_tokens").asInt(0);
             output = body.path("usage").path("output_tokens").asInt(0);
         } else {
-            text = body.path("choices").path(0).path("message").path("content").asText("");
+            JsonNode message = body.path("choices").path(0).path("message");
+            text = message.path("content").asText("");
+            JsonNode call = message.path("tool_calls").path(0);
+            if (!call.isMissingNode() && !call.path("function").path("name").asText("").isBlank()) {
+                toolId = call.path("id").asText();
+                toolName = call.path("function").path("name").asText();
+                toolArgs = call.path("function").path("arguments").asText("{}");
+            }
             input = body.path("usage").path("prompt_tokens").asInt(0);
             output = body.path("usage").path("completion_tokens").asInt(0);
         }
         String answeredModel = body.path("model").asText(model);
+        LLMResponse.Usage usage = new LLMResponse.Usage(input, output, input + output);
+        // Fase T: one tool per turn (the agent loop runs them one at a time) — the first one wins.
+        String requested = toolName;
+        if (requested != null && request.tools().stream().anyMatch(t -> t.name().equals(requested))) {
+            return new LLMResponse(UUID.randomUUID(), provider, answeredModel, LLMResponse.KIND_TOOL_USE, null,
+                toolId, toolName, toolArgs == null || toolArgs.isBlank() ? "{}" : toolArgs, usage, duration, null, List.of());
+        }
         return new LLMResponse(UUID.randomUUID(), provider, answeredModel, LLMResponse.KIND_FINAL, text, null, null, null,
-            new LLMResponse.Usage(input, output, input + output), duration, null, List.of());
+            usage, duration, null, List.of());
+    }
+
+    private static final String EMPTY_SCHEMA = "{\"type\":\"object\",\"properties\":{}}";
+
+    private JsonNode schemaOf(LLMRequest.ToolSpec tool) {
+        if (tool.inputSchema() != null && tool.inputSchema().isObject()) return tool.inputSchema();
+        try {
+            return json.readTree(EMPTY_SCHEMA);
+        } catch (IOException exception) {
+            throw new IllegalStateException(exception);
+        }
+    }
+
+    private JsonNode argsOf(LLMMessage message) {
+        try {
+            JsonNode node = json.readTree(message.toolArgsJson() == null || message.toolArgsJson().isBlank() ? "{}" : message.toolArgsJson());
+            return node.isObject() ? node : json.createObjectNode();
+        } catch (IOException exception) {
+            return json.createObjectNode();
+        }
     }
 
     private ObjectNode anthropicPayload(String model, LLMRequest request, int defaultMaxTokens) {
@@ -97,18 +141,61 @@ class ProviderWireClient {
         String system = request.messages().stream().filter(m -> m.role().equals("system")).map(LLMMessage::content).collect(Collectors.joining("\n"));
         if (!system.isBlank()) node.put("system", system);
         ArrayNode messages = node.putArray("messages");
-        request.messages().stream().filter(m -> !m.role().equals("system"))
-            .forEach(m -> messages.addObject().put("role", m.role()).put("content", m.content()));
+        for (LLMMessage m : request.messages()) {
+            if (m.role().equals("system")) continue;
+            // Anthropic: a tool request is an assistant tool_use block; its result is a user
+            // tool_result block. Consecutive messages of the same role are merged (it requires
+            // alternating roles).
+            String role = m.role().equals("tool") ? "user" : m.role();
+            ObjectNode block = json.createObjectNode();
+            if (m.isToolRequest()) {
+                block.put("type", "tool_use").put("id", m.toolCallId()).put("name", m.toolName()).set("input", argsOf(m));
+            } else if (m.role().equals("tool")) {
+                block.put("type", "tool_result").put("tool_use_id", m.toolCallId()).put("content", m.content());
+            } else {
+                block.put("type", "text").put("text", m.content());
+            }
+            JsonNode last = messages.isEmpty() ? null : messages.get(messages.size() - 1);
+            if (last != null && last.path("role").asText().equals(role)) {
+                ((ArrayNode) last.path("content")).add(block);
+            } else {
+                ObjectNode message = messages.addObject().put("role", role);
+                message.putArray("content").add(block);
+            }
+        }
+        if (!request.tools().isEmpty()) {
+            ArrayNode tools = node.putArray("tools");
+            request.tools().forEach(t -> tools.addObject().put("name", t.name()).put("description", t.description()).set("input_schema", schemaOf(t)));
+        }
         if (request.parameters() != null && request.parameters().temperature() != null) node.put("temperature", request.parameters().temperature());
         return node;
     }
 
-    private ObjectNode openAiPayload(String model, LLMRequest request, int defaultMaxTokens) {
+    private ObjectNode openAiPayload(String provider, String model, LLMRequest request, int defaultMaxTokens) {
         ObjectNode node = json.createObjectNode();
         node.put("model", model);
-        node.put("max_tokens", maxTokens(request, defaultMaxTokens));
+        // OpenAI's current models reject max_tokens; compatible services (Ollama, Groq…) still use it.
+        node.put(ProviderUrlPolicy.OPENAI.equals(provider) ? "max_completion_tokens" : "max_tokens", maxTokens(request, defaultMaxTokens));
         ArrayNode messages = node.putArray("messages");
-        request.messages().forEach(m -> messages.addObject().put("role", m.role()).put("content", m.content()));
+        for (LLMMessage m : request.messages()) {
+            ObjectNode message = messages.addObject().put("role", m.role());
+            if (m.isToolRequest()) {
+                message.putNull("content");
+                ObjectNode call = message.putArray("tool_calls").addObject().put("id", m.toolCallId()).put("type", "function");
+                call.putObject("function").put("name", m.toolName()).put("arguments", argsOf(m).toString());
+            } else if (m.role().equals("tool")) {
+                message.put("tool_call_id", m.toolCallId()).put("content", m.content());
+            } else {
+                message.put("content", m.content());
+            }
+        }
+        if (!request.tools().isEmpty()) {
+            ArrayNode tools = node.putArray("tools");
+            request.tools().forEach(t -> {
+                ObjectNode fn = tools.addObject().put("type", "function").putObject("function");
+                fn.put("name", t.name()).put("description", t.description()).set("parameters", schemaOf(t));
+            });
+        }
         if (request.parameters() != null && request.parameters().temperature() != null) node.put("temperature", request.parameters().temperature());
         return node;
     }

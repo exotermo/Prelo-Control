@@ -79,7 +79,12 @@ public class AnthropicProvider implements LLMProvider {
     private AnthropicDtos.ChatRequest toAnthropicRequest(String model, LLMRequest request) {
         String system = request.messages().stream().filter(m -> m.role().equals("system")).map(LLMMessage::content).collect(Collectors.joining("\n"));
         List<AnthropicDtos.Message> messages = request.messages().stream().filter(m -> !m.role().equals("system"))
-            .map(m -> new AnthropicDtos.Message(m.role(), m.content())).toList();
+            // Static-profile path stays text-only: tool turns are folded into plain text.
+            .map(m -> m.role().equals("tool")
+                ? new AnthropicDtos.Message("user", "Resultado da ferramenta " + m.toolName() + ": " + m.content())
+                : m.isToolRequest()
+                    ? new AnthropicDtos.Message("assistant", "Pedi a ferramenta " + m.toolName() + " com " + m.toolArgsJson())
+                    : new AnthropicDtos.Message(m.role(), m.content())).toList();
         int maxTokens = request.parameters() != null && request.parameters().maxTokens() != null ? request.parameters().maxTokens() : properties.maxTokens();
         Double temperature = request.parameters() != null ? request.parameters().temperature() : null;
         return new AnthropicDtos.ChatRequest(model, maxTokens, system.isBlank() ? null : system, messages, temperature);

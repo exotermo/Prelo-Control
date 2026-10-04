@@ -61,7 +61,19 @@ class CliRunnerClient {
         if (model != null && !model.isBlank()) payload.put("model", model);
         payload.put("timeoutMs", timeout.toMillis());
         ArrayNode messages = payload.putArray("messages");
-        request.messages().forEach(m -> messages.addObject().put("role", m.role()).put("content", m.content()));
+        request.messages().forEach(m -> {
+            ObjectNode message = messages.addObject().put("role", m.role()).put("content", m.content());
+            if (m.toolCallId() != null) message.put("toolCallId", m.toolCallId());
+            if (m.toolName() != null) message.put("toolName", m.toolName());
+            if (m.toolArgsJson() != null) message.put("toolArgsJson", m.toolArgsJson());
+        });
+        if (!request.tools().isEmpty()) {
+            ArrayNode tools = payload.putArray("tools");
+            request.tools().forEach(t -> {
+                ObjectNode tool = tools.addObject().put("name", t.name()).put("description", t.description());
+                if (t.inputSchema() != null) tool.set("inputSchema", t.inputSchema());
+            });
+        }
         HttpRequest.Builder builder;
         try {
             builder = HttpRequest.newBuilder(URI.create(baseUrl + "/v1/run"))
@@ -73,9 +85,16 @@ class CliRunnerClient {
         JsonNode body = send(builder, provider);
         int input = body.path("inputTokens").asInt(0);
         int output = body.path("outputTokens").asInt(0);
-        return new LLMResponse(UUID.randomUUID(), provider, body.path("model").asText(model), LLMResponse.KIND_FINAL,
-            body.path("text").asText(""), null, null, null, new LLMResponse.Usage(input, output, input + output),
-            body.path("durationMs").asLong(0), null, List.of());
+        LLMResponse.Usage usage = new LLMResponse.Usage(input, output, input + output);
+        String answeredModel = body.path("model").asText(model);
+        if ("tool".equals(body.path("kind").asText()) && !body.path("toolName").asText("").isBlank()) {
+            // The CLIs have no call ids of their own; the caller's next turn just needs a stable one.
+            return new LLMResponse(UUID.randomUUID(), provider, answeredModel, LLMResponse.KIND_TOOL_USE, null,
+                "cli_" + UUID.randomUUID().toString().replace("-", ""), body.path("toolName").asText(),
+                body.path("toolArgsJson").asText("{}"), usage, body.path("durationMs").asLong(0), null, List.of());
+        }
+        return new LLMResponse(UUID.randomUUID(), provider, answeredModel, LLMResponse.KIND_FINAL,
+            body.path("text").asText(""), null, null, null, usage, body.path("durationMs").asLong(0), null, List.of());
     }
 
     static final String RUNNER_MESSAGE = "cli-runner: ";
