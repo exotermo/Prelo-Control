@@ -21,6 +21,8 @@ type Project struct {
 	DefaultAgentID *string
 	Instructions   *string
 	CoverColor     string
+	// Fase C1: the client this project is for (optional; set via SetProjectClient).
+	ClientID *ClientID
 }
 
 const MaxProjectInstructionsLength = 4000
