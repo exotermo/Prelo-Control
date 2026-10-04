@@ -54,7 +54,7 @@ func (r *ProjectMemberRepository) ListMembers(ctx context.Context, projectID dom
 func (r *ProjectMemberRepository) ListProjectsForUser(ctx context.Context, userID domain.DashboardUserID) ([]domain.Project, error) {
 	rows, err := r.pool.Query(ctx, `
 		SELECT p.id, p.name, p.description, p.created_at, p.created_by, p.project_version, p.deleted_at,
-		       p.default_agent_id, p.instructions, p.cover_color
+		       p.default_agent_id, p.instructions, p.cover_color, p.client_id
 		  FROM projects p
 		  JOIN project_members m ON m.project_id = p.id
 		 WHERE m.dashboard_user_id = $1 AND p.deleted_at IS NULL

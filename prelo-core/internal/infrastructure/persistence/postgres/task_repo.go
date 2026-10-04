@@ -30,8 +30,10 @@ func (r *TaskRepository) Insert(ctx context.Context, task domain.Task) error {
 		tenantID = task.TenantID
 	}
 	_, err := r.pool.Exec(ctx, `
-		INSERT INTO tasks (id, tenant_id, project_id, description, status, created_at, agent_id, task_version, parent_task_id, depth, source)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`,
+		INSERT INTO tasks (id, tenant_id, project_id, description, status, created_at, agent_id, task_version, parent_task_id, depth, source, client_id)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11,
+		        -- Fase C1: a task inherits the client of its project (delegated subtasks too).
+		        (SELECT p.client_id FROM projects p WHERE p.id = $3))`,
 		task.ID.Value, tenantID, projectIDValue(task.ProjectID), task.Description, string(task.Status), task.CreatedAt, task.AgentID.Value, task.Version, parentTaskID, task.Depth, string(task.Source))
 	return err
 }

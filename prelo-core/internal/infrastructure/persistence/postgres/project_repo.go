@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
@@ -26,7 +27,7 @@ func (r *ProjectRepository) Insert(ctx context.Context, project domain.Project) 
 }
 
 const projectSelect = `SELECT id, name, description, created_at, created_by, project_version, deleted_at,
-	       default_agent_id, instructions, cover_color
+	       default_agent_id, instructions, cover_color, client_id
 	  FROM projects WHERE deleted_at IS NULL`
 
 func (r *ProjectRepository) FindByID(ctx context.Context, id domain.ProjectID) (domain.Project, error) {
@@ -82,8 +83,9 @@ func (r *ProjectRepository) Update(ctx context.Context, p domain.Project) (domai
 func scanProject(row pgx.Row) (domain.Project, error) {
 	var p domain.Project
 	var createdBy *string
+	var clientID *uuid.UUID
 	if err := row.Scan(&p.ID.Value, &p.Name, &p.Description, &p.CreatedAt, &createdBy, &p.Version, &p.DeletedAt,
-		&p.DefaultAgentID, &p.Instructions, &p.CoverColor); err != nil {
+		&p.DefaultAgentID, &p.Instructions, &p.CoverColor, &clientID); err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return domain.Project{}, application.ErrProjectNotFound
 		}
@@ -91,6 +93,9 @@ func scanProject(row pgx.Row) (domain.Project, error) {
 	}
 	if createdBy != nil {
 		p.CreatedBy = *createdBy
+	}
+	if clientID != nil {
+		p.ClientID = &domain.ClientID{Value: *clientID}
 	}
 	return p, nil
 }
