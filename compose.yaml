@@ -37,6 +37,9 @@ services:
       # prelo-core. DEV ONLY: set GATEWAY_CONNECTIONS_ALLOW_PRIVATE_URLS=true to reach a local Ollama.
       GATEWAY_CONNECTIONS_MASTER_KEY_FILE: /run/secrets/gateway_connections_key
       GATEWAY_CONNECTIONS_ALLOW_PRIVATE_URLS: ${GATEWAY_CONNECTIONS_ALLOW_PRIVATE_URLS:-false}
+      # Fase X: subscription CLIs (claude_cli / codex_cli connections) run in cli-runner.
+      GATEWAY_CONNECTIONS_CLI_RUNNER_URL: http://cli-runner:8099
+      GATEWAY_CONNECTIONS_CLI_RUNNER_TOKEN: ${PRELO_CLI_RUNNER_TOKEN:?set PRELO_CLI_RUNNER_TOKEN in .env}
     secrets:
       - anthropic_api_key
       - gateway_connections_key
@@ -52,6 +55,30 @@ services:
       timeout: 5s
       retries: 12
       start_period: 20s
+    restart: unless-stopped
+
+  # Fase X: the owner's Claude Code / Codex CLIs (Pro plans) as a text-only model for llm-gateway.
+  # Logged in once, with its own credentials kept in the cli_home volume (never the host's):
+  #   docker compose exec -it cli-runner codex login --device-auth
+  #   docker compose exec -it cli-runner claude        (then /login, then /exit)
+  # Only llm-gateway reaches it (internal network + shared token); egress is for the vendors' APIs.
+  cli-runner:
+    build:
+      context: ./cli-runner
+    environment:
+      CLI_RUNNER_TOKEN: ${PRELO_CLI_RUNNER_TOKEN:?set PRELO_CLI_RUNNER_TOKEN in .env}
+      CLI_RUNNER_CONCURRENCY: ${PRELO_CLI_RUNNER_CONCURRENCY:-2}
+    volumes:
+      - cli_home:/home/runner
+    tmpfs:
+      - /tmp:size=64m,mode=1777
+    read_only: true
+    cap_drop: [ALL]
+    security_opt:
+      - no-new-privileges:true
+    networks:
+      - prelo_internal
+      - prelo_egress
     restart: unless-stopped
 
   # PARKED (2026-09-23): prelo-core is now the production service (ADR-012/ADR-013 cutover,
@@ -218,6 +245,8 @@ networks:
 volumes:
   postgres_data:
   project_files:
+  # Fase X: cli-runner's HOME — the CLIs' own logins (back up/remove like credentials).
+  cli_home:
 
 # Sourced from an env var (ANTHROPIC_API_KEY, via .env), not a committed file — still reaches the
 # container exclusively as a mounted file at /run/secrets/anthropic_api_key, never as an env var
