@@ -1,19 +1,19 @@
 # Pinned so renaming/moving this directory never changes the volume/network names.
-name: hermeserenato
+name: prelo
 
 services:
   postgres:
     image: postgres:17-alpine
     environment:
-      POSTGRES_DB: hermes
-      POSTGRES_USER: hermes
+      POSTGRES_DB: prelo
+      POSTGRES_USER: prelo
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
     volumes:
       - postgres_data:/var/lib/postgresql/data
     networks:
-      - hermes_internal
+      - prelo_internal
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U hermes -d hermes"]
+      test: ["CMD-SHELL", "pg_isready -U prelo -d prelo"]
       interval: 10s
       timeout: 5s
       retries: 10
@@ -23,18 +23,18 @@ services:
     build:
       context: ./llm-gateway
     environment:
-      SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/hermes?currentSchema=gateway
-      SPRING_DATASOURCE_USERNAME: hermes
+      SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/prelo?currentSchema=gateway
+      SPRING_DATASOURCE_USERNAME: prelo
       SPRING_DATASOURCE_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
-      GATEWAY_JWT_SECRET: ${HERMES_GATEWAY_JWT_SECRET:?set HERMES_GATEWAY_JWT_SECRET in .env}
-      GATEWAY_JWT_ISSUER: ${HERMES_GATEWAY_ISSUER:-hermes-dev}
-      GATEWAY_JWT_AUDIENCE: ${HERMES_GATEWAY_AUDIENCE:-llm-gateway}
+      GATEWAY_JWT_SECRET: ${PRELO_GATEWAY_JWT_SECRET:?set PRELO_GATEWAY_JWT_SECRET in .env}
+      GATEWAY_JWT_ISSUER: ${PRELO_GATEWAY_ISSUER:-prelo-dev}
+      GATEWAY_JWT_AUDIENCE: ${PRELO_GATEWAY_AUDIENCE:-llm-gateway}
       GATEWAY_PROVIDER_MOCK_ENABLED: "true"
       GATEWAY_PROVIDER_ANTHROPIC_ENABLED: ${GATEWAY_PROVIDER_ANTHROPIC_ENABLED:-false}
       GATEWAY_PROVIDER_ANTHROPIC_API_KEY_FILE: /run/secrets/anthropic_api_key
       # Fase M: master key sealing the provider keys saved from the dashboard (AES-256-GCM over a
       # per-record HKDF data key). Mounted as a file only here — never in the database, never in
-      # hermes-go. DEV ONLY: set GATEWAY_CONNECTIONS_ALLOW_PRIVATE_URLS=true to reach a local Ollama.
+      # prelo-core. DEV ONLY: set GATEWAY_CONNECTIONS_ALLOW_PRIVATE_URLS=true to reach a local Ollama.
       GATEWAY_CONNECTIONS_MASTER_KEY_FILE: /run/secrets/gateway_connections_key
       GATEWAY_CONNECTIONS_ALLOW_PRIVATE_URLS: ${GATEWAY_CONNECTIONS_ALLOW_PRIVATE_URLS:-false}
     secrets:
@@ -44,8 +44,8 @@ services:
       postgres:
         condition: service_healthy
     networks:
-      - hermes_internal
-      - hermes_egress
+      - prelo_internal
+      - prelo_egress
     healthcheck:
       test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:8081/actuator/health | grep -q 'UP'"]
       interval: 10s
@@ -54,23 +54,23 @@ services:
       start_period: 20s
     restart: unless-stopped
 
-  # PARKED (2026-09-23): hermes-go is now the production service (ADR-012/ADR-013 cutover,
-  # authorized by the project owner). hermes-app (Java) is kept as source-only reference — code
+  # PARKED (2026-09-23): prelo-core is now the production service (ADR-012/ADR-013 cutover,
+  # authorized by the project owner). legacy-java-app (Java) is kept as source-only reference — code
   # untouched, never deleted — but excluded from the default `docker compose up`. Start it
-  # explicitly with `docker compose --profile legacy-java up hermes` if you need to compare
+  # explicitly with `docker compose --profile legacy-java up prelo` if you need to compare
   # behavior against it again.
-  hermes:
+  prelo:
     profiles: ["legacy-java"]
     build:
-      context: ./hermes-app
+      context: ./legacy-java-app
     environment:
-      SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/hermes?currentSchema=hermes_app
-      SPRING_DATASOURCE_USERNAME: hermes
+      SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/prelo?currentSchema=prelo_app
+      SPRING_DATASOURCE_USERNAME: prelo
       SPRING_DATASOURCE_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
-      HERMES_GATEWAY_BASE_URL: http://llm-gateway:8081
-      HERMES_GATEWAY_JWT_SECRET: ${HERMES_GATEWAY_JWT_SECRET:?set HERMES_GATEWAY_JWT_SECRET in .env}
-      HERMES_GATEWAY_ISSUER: ${HERMES_GATEWAY_ISSUER:-hermes-dev}
-      HERMES_GATEWAY_AUDIENCE: ${HERMES_GATEWAY_AUDIENCE:-llm-gateway}
+      PRELO_GATEWAY_BASE_URL: http://llm-gateway:8081
+      PRELO_GATEWAY_JWT_SECRET: ${PRELO_GATEWAY_JWT_SECRET:?set PRELO_GATEWAY_JWT_SECRET in .env}
+      PRELO_GATEWAY_ISSUER: ${PRELO_GATEWAY_ISSUER:-prelo-dev}
+      PRELO_GATEWAY_AUDIENCE: ${PRELO_GATEWAY_AUDIENCE:-llm-gateway}
     depends_on:
       postgres:
         condition: service_healthy
@@ -79,8 +79,8 @@ services:
     ports:
       - "127.0.0.1:8080:8080"
     networks:
-      - hermes_internal
-      - hermes_publish
+      - prelo_internal
+      - prelo_publish
     healthcheck:
       test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:8080/actuator/health | grep -q 'UP'"]
       interval: 10s
@@ -92,7 +92,7 @@ services:
   redis:
     image: redis:7-alpine
     networks:
-      - hermes_internal
+      - prelo_internal
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 10s
@@ -102,83 +102,83 @@ services:
 
   # Local SMTP catcher for dev/testing the dashboard-auth email flow (activation link, password
   # reset) without real SMTP credentials — captures everything sent to it, nothing leaves the
-  # host. Point HERMES_GO_SMTP_* at a real provider for production; this container is not meant
+  # host. Point PRELO_SMTP_* at a real provider for production; this container is not meant
   # to run there. Same pattern as messager-interface's mailpit service.
   mailpit:
     image: axllent/mailpit:latest
     networks:
-      - hermes_internal
-      - hermes_publish
+      - prelo_internal
+      - prelo_publish
     ports:
       - "127.0.0.1:8026:8025"
     restart: unless-stopped
 
-  hermes-go:
+  prelo-core:
     build:
-      context: ./hermes-app-go
+      context: ./prelo-core
       # LOCAL-DEV WORKAROUND — a problem of the developer's own machine, NOT of this project and
-      # NOT to be carried to the server that runs Hermes. On that workstation the BuildKit
+      # NOT to be carried to the server that runs Prelo. On that workstation the BuildKit
       # sandbox's DNS (1.0.0.1) times out resolving proxy.golang.org, so `go mod download`
-      # (hermes-app-go/Dockerfile; vendor/ is intentionally not versioned) fails on the default
+      # (prelo-core/Dockerfile; vendor/ is intentionally not versioned) fails on the default
       # build network. Host networking uses the host's working resolver instead.
       # On any host whose Docker builds can reach proxy.golang.org, DELETE this line (or fix the
       # daemon DNS via "dns" in /etc/docker/daemon.json) — see docs/DEV_HOST_NOTES.md.
       network: host
     environment:
-      HERMES_GO_PORT: "8080"
-      HERMES_GO_DB_HOST: postgres
-      HERMES_GO_DB_PORT: "5432"
-      HERMES_GO_DB_NAME: hermes
-      HERMES_GO_DB_SCHEMA: hermes_app
-      HERMES_GO_DB_USER: hermes
-      HERMES_GO_DB_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
-      HERMES_GO_REDIS_ADDR: redis:6379
-      HERMES_GATEWAY_BASE_URL: http://llm-gateway:8081
-      HERMES_GATEWAY_JWT_SECRET: ${HERMES_GATEWAY_JWT_SECRET:?set HERMES_GATEWAY_JWT_SECRET in .env}
-      HERMES_GATEWAY_ISSUER: ${HERMES_GATEWAY_ISSUER:-hermes-dev}
-      HERMES_GATEWAY_AUDIENCE: ${HERMES_GATEWAY_AUDIENCE:-llm-gateway}
+      PRELO_PORT: "8080"
+      PRELO_DB_HOST: postgres
+      PRELO_DB_PORT: "5432"
+      PRELO_DB_NAME: prelo
+      PRELO_DB_SCHEMA: prelo_app
+      PRELO_DB_USER: prelo
+      PRELO_DB_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+      PRELO_REDIS_ADDR: redis:6379
+      PRELO_GATEWAY_BASE_URL: http://llm-gateway:8081
+      PRELO_GATEWAY_JWT_SECRET: ${PRELO_GATEWAY_JWT_SECRET:?set PRELO_GATEWAY_JWT_SECRET in .env}
+      PRELO_GATEWAY_ISSUER: ${PRELO_GATEWAY_ISSUER:-prelo-dev}
+      PRELO_GATEWAY_AUDIENCE: ${PRELO_GATEWAY_AUDIENCE:-llm-gateway}
       # Inbound API authentication is independent from the LLM gateway credential. The value
       # must be the same signing secret used by messaging-core integration access tokens.
-      HERMES_GO_API_JWT_SECRET: ${HERMES_GO_API_JWT_SECRET:?set HERMES_GO_API_JWT_SECRET in .env}
-      HERMES_GO_API_JWT_ISSUER: ${HERMES_GO_API_JWT_ISSUER:-messaging-core}
-      HERMES_GO_API_JWT_AUDIENCE: ${HERMES_GO_API_JWT_AUDIENCE:-messaging-core}
-      HERMES_GO_API_AUTH_ENABLED: "true"
-      HERMES_GO_TOOL_TIMEOUT_SECONDS: ${HERMES_GO_TOOL_TIMEOUT_SECONDS:-30}
-      HERMES_GO_TOOL_MAX_ARGS_BYTES: ${HERMES_GO_TOOL_MAX_ARGS_BYTES:-65536}
-      HERMES_GO_TOOL_MAX_RESULT_BYTES: ${HERMES_GO_TOOL_MAX_RESULT_BYTES:-65536}
-      HERMES_GO_TOOL_MAX_CONCURRENT: ${HERMES_GO_TOOL_MAX_CONCURRENT:-16}
-      # Fase G1: human login (password + mandatory TOTP) for hermes-dashboard.
-      HERMES_GO_DASHBOARD_MFA_KEY: ${HERMES_GO_DASHBOARD_MFA_KEY:?set HERMES_GO_DASHBOARD_MFA_KEY in .env (openssl rand -base64 32)}
-      HERMES_GO_DASHBOARD_PUBLIC_URL: ${HERMES_GO_DASHBOARD_PUBLIC_URL:-http://127.0.0.1:5176}
-      HERMES_GO_DASHBOARD_SECURE_COOKIE: ${HERMES_GO_DASHBOARD_SECURE_COOKIE:-false}
+      PRELO_API_JWT_SECRET: ${PRELO_API_JWT_SECRET:?set PRELO_API_JWT_SECRET in .env}
+      PRELO_API_JWT_ISSUER: ${PRELO_API_JWT_ISSUER:-messaging-core}
+      PRELO_API_JWT_AUDIENCE: ${PRELO_API_JWT_AUDIENCE:-messaging-core}
+      PRELO_API_AUTH_ENABLED: "true"
+      PRELO_TOOL_TIMEOUT_SECONDS: ${PRELO_TOOL_TIMEOUT_SECONDS:-30}
+      PRELO_TOOL_MAX_ARGS_BYTES: ${PRELO_TOOL_MAX_ARGS_BYTES:-65536}
+      PRELO_TOOL_MAX_RESULT_BYTES: ${PRELO_TOOL_MAX_RESULT_BYTES:-65536}
+      PRELO_TOOL_MAX_CONCURRENT: ${PRELO_TOOL_MAX_CONCURRENT:-16}
+      # Fase G1: human login (password + mandatory TOTP) for prelo-dashboard.
+      PRELO_DASHBOARD_MFA_KEY: ${PRELO_DASHBOARD_MFA_KEY:?set PRELO_DASHBOARD_MFA_KEY in .env (openssl rand -base64 32)}
+      PRELO_DASHBOARD_PUBLIC_URL: ${PRELO_DASHBOARD_PUBLIC_URL:-http://127.0.0.1:5176}
+      PRELO_DASHBOARD_SECURE_COOKIE: ${PRELO_DASHBOARD_SECURE_COOKIE:-false}
       # Credentialed CORS allowlist (refresh/logout send credentials: "include" for the session
       # cookie) — must be the dashboard's exact origin(s), never "*". See platform/cors.go.
-      HERMES_GO_DASHBOARD_ALLOWED_ORIGINS: ${HERMES_GO_DASHBOARD_ALLOWED_ORIGINS:-http://127.0.0.1:5176,http://localhost:5176}
-      HERMES_GO_ADMIN_TOKEN: ${HERMES_GO_ADMIN_TOKEN:?set HERMES_GO_ADMIN_TOKEN in .env}
-      HERMES_GO_DASHBOARD_MAIL_FROM: ${HERMES_GO_DASHBOARD_MAIL_FROM:-}
-      HERMES_GO_SMTP_HOST: ${HERMES_GO_SMTP_HOST:-}
-      HERMES_GO_SMTP_PORT: ${HERMES_GO_SMTP_PORT:-587}
-      HERMES_GO_SMTP_USER: ${HERMES_GO_SMTP_USER:-}
-      HERMES_GO_SMTP_PASSWORD: ${HERMES_GO_SMTP_PASSWORD:-}
-      HERMES_GO_SMTP_AUTH: ${HERMES_GO_SMTP_AUTH:-true}
-      HERMES_GO_SMTP_STARTTLS: ${HERMES_GO_SMTP_STARTTLS:-true}
+      PRELO_DASHBOARD_ALLOWED_ORIGINS: ${PRELO_DASHBOARD_ALLOWED_ORIGINS:-http://127.0.0.1:5176,http://localhost:5176}
+      PRELO_ADMIN_TOKEN: ${PRELO_ADMIN_TOKEN:?set PRELO_ADMIN_TOKEN in .env}
+      PRELO_DASHBOARD_MAIL_FROM: ${PRELO_DASHBOARD_MAIL_FROM:-}
+      PRELO_SMTP_HOST: ${PRELO_SMTP_HOST:-}
+      PRELO_SMTP_PORT: ${PRELO_SMTP_PORT:-587}
+      PRELO_SMTP_USER: ${PRELO_SMTP_USER:-}
+      PRELO_SMTP_PASSWORD: ${PRELO_SMTP_PASSWORD:-}
+      PRELO_SMTP_AUTH: ${PRELO_SMTP_AUTH:-true}
+      PRELO_SMTP_STARTTLS: ${PRELO_SMTP_STARTTLS:-true}
       # Fase G2: optional — lets the Configurações page manage the bridge's owner-contacts list.
-      # HERMES_BRIDGE_ADMIN_TOKEN must equal that service's own BRIDGE_ADMIN_TOKEN.
-      HERMES_BRIDGE_ADMIN_URL: ${HERMES_BRIDGE_ADMIN_URL:-}
-      HERMES_BRIDGE_ADMIN_TOKEN: ${HERMES_BRIDGE_ADMIN_TOKEN:-}
+      # PRELO_BRIDGE_ADMIN_TOKEN must equal that service's own BRIDGE_ADMIN_TOKEN.
+      PRELO_BRIDGE_ADMIN_URL: ${PRELO_BRIDGE_ADMIN_URL:-}
+      PRELO_BRIDGE_ADMIN_TOKEN: ${PRELO_BRIDGE_ADMIN_TOKEN:-}
       # Fase S1: optional — lets the Servidores page register servers and SSH into them for
-      # health checks. Must be a DIFFERENT 32-byte Base64 key than HERMES_GO_DASHBOARD_MFA_KEY —
+      # health checks. Must be a DIFFERENT 32-byte Base64 key than PRELO_DASHBOARD_MFA_KEY —
       # an SSH private key and a human's TOTP secret must never share an encryption key.
-      HERMES_GO_SERVER_CREDENTIALS_KEY: ${HERMES_GO_SERVER_CREDENTIALS_KEY:-}
+      PRELO_SERVER_CREDENTIALS_KEY: ${PRELO_SERVER_CREDENTIALS_KEY:-}
       # Fase I: optional — enables per-project API keys and outbound webhooks. Its own 32-byte
       # Base64 key (webhook signing secrets), never shared with the TOTP or SSH-credential keys.
-      HERMES_GO_INTEGRATIONS_KEY: ${HERMES_GO_INTEGRATIONS_KEY:-}
+      PRELO_INTEGRATIONS_KEY: ${PRELO_INTEGRATIONS_KEY:-}
       # Fase PA: optional — project files sealed at rest (per-file HKDF key, chunked AES-256-GCM).
       # Its own 32-byte Base64 key; losing it makes every stored file unreadable — back it up.
-      HERMES_GO_FILES_KEY: ${HERMES_GO_FILES_KEY:-}
+      PRELO_FILES_KEY: ${PRELO_FILES_KEY:-}
       # DEV ONLY: lets webhooks target private/loopback addresses and plain http:// (turns off
       # the SSRF guard). Must stay false anywhere real.
-      HERMES_GO_WEBHOOK_ALLOW_PRIVATE_TARGETS: ${HERMES_GO_WEBHOOK_ALLOW_PRIVATE_TARGETS:-false}
+      PRELO_WEBHOOK_ALLOW_PRIVATE_TARGETS: ${PRELO_WEBHOOK_ALLOW_PRIVATE_TARGETS:-false}
     depends_on:
       postgres:
         condition: service_healthy
@@ -191,11 +191,11 @@ services:
     ports:
       - "127.0.0.1:8082:8080"
     networks:
-      hermes_internal:
-      hermes_publish:
-      hermes-shared:
+      prelo_internal:
+      prelo_publish:
+      prelo-shared:
         aliases:
-          - hermes-go
+          - prelo-core
     healthcheck:
       test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:8080/actuator/health | grep -q 'UP'"]
       interval: 10s
@@ -205,14 +205,14 @@ services:
     restart: unless-stopped
 
 networks:
-  hermes_internal:
+  prelo_internal:
     internal: true
-  hermes_egress:
-  hermes_publish:
-  # Rede compartilhada com ~/projects/hermes-messaging-bridge (criada fora do compose com
-  # `docker network create hermes-shared`) — só hermes-go entra aqui, pra o bridge conseguir
+  prelo_egress:
+  prelo_publish:
+  # Rede compartilhada com ~/projects/prelo-messaging-bridge (criada fora do compose com
+  # `docker network create prelo-shared`) — só prelo-core entra aqui, pra o bridge conseguir
   # chamar a API de tasks por nome de container, sem publicar porta nenhuma pra fora.
-  hermes-shared:
+  prelo-shared:
     external: true
 
 volumes:
@@ -221,7 +221,7 @@ volumes:
 
 # Sourced from an env var (ANTHROPIC_API_KEY, via .env), not a committed file — still reaches the
 # container exclusively as a mounted file at /run/secrets/anthropic_api_key, never as an env var
-# inside the container itself. Mounted only in llm-gateway; hermes never sees this secret.
+# inside the container itself. Mounted only in llm-gateway; prelo never sees this secret.
 secrets:
   anthropic_api_key:
     environment: ANTHROPIC_API_KEY
