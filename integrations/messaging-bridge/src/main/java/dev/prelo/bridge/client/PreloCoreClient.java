@@ -35,15 +35,21 @@ public class PreloCoreClient {
             properties.preloApiJwtAudience(), SCOPES, TOKEN_TTL);
     }
 
-    public ExecutionResult run(String description, String agentId, Duration timeout) {
+    public ExecutionResult run(String description, String agentId, String contactAddress, Duration timeout) {
         String taskId;
         try {
             // source=MESSAGING lets prelo-dashboard's Tasks page tell a WhatsApp exchange apart
             // from a task someone actually designated (found 2026-10-02 — every inbound message
             // was showing up indistinguishable from manually created work).
+            // contactAddress (Fase C2) is the sender as WhatsApp delivered it (a phone JID or a
+            // "@lid" WhatsApp ID): prelo-core ties the task to the client who owns that contact.
+            Map<String, Object> body = new java.util.HashMap<>(Map.of("description", description, "agentId", agentId, "source", "MESSAGING"));
+            if (contactAddress != null && !contactAddress.isBlank()) {
+                body.put("contactAddress", contactAddress);
+            }
             Map<?, ?> created = client.post().uri("/api/v1/tasks")
                 .header("Authorization", "Bearer " + token())
-                .body(Map.of("description", description, "agentId", agentId, "source", "MESSAGING"))
+                .body(body)
                 .retrieve().body(Map.class);
             taskId = (String) created.get("id");
         } catch (RuntimeException exception) {

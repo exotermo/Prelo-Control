@@ -54,7 +54,7 @@ class PreloCoreClientTest {
             300, true, "shared-secret", "messaging-core", "messaging-core");
         PreloCoreClient client = new PreloCoreClient(properties);
 
-        PreloCoreClient.ExecutionResult result = client.run("hi", "general", Duration.ofSeconds(5));
+        PreloCoreClient.ExecutionResult result = client.run("hi", "general", "26668123456789@lid", Duration.ofSeconds(5));
 
         assertEquals("COMPLETED", result.status());
         assertEquals("[mock] hi", result.result());
@@ -70,6 +70,9 @@ class PreloCoreClientTest {
         // designated — the bridge must tag every task it creates as MESSAGING.
         assertTrue(capturedCreateBody.get().contains("\"source\":\"MESSAGING\""),
             "task creation must be tagged source=MESSAGING: " + capturedCreateBody.get());
+        // Fase C2: the sender travels with the task so prelo-core can tie it to a client.
+        assertTrue(capturedCreateBody.get().contains("\"contactAddress\":\"26668123456789@lid\""),
+            "task creation must carry the sender: " + capturedCreateBody.get());
     }
 
     private static String decodePayload(String jwt) {

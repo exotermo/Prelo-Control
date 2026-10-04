@@ -27,7 +27,7 @@ class InboundMessageHandlerTest {
         PreloCoreClient prelo = mock(PreloCoreClient.class);
         InboundEventStore events = mock(InboundEventStore.class);
         OutboundReplyStore replies = mock(OutboundReplyStore.class);
-        when(prelo.run(anyString(), anyString(), any())).thenReturn(new PreloCoreClient.ExecutionResult("task-42", "COMPLETED", "reply", null));
+        when(prelo.run(anyString(), anyString(), any(), any())).thenReturn(new PreloCoreClient.ExecutionResult("task-42", "COMPLETED", "reply", null));
         BridgeProperties properties = new BridgeProperties("", "", "", "", "", true, "admin", List.of());
         OwnerContactStore ownerContacts = mock(OwnerContactStore.class);
         when(ownerContacts.contains("+5511999999999")).thenReturn(true);
@@ -48,7 +48,7 @@ class InboundMessageHandlerTest {
             assertEquals("reply", captor.getValue().text());
             verify(events).markStatus("msg", InboundEventStatus.DONE);
             // The sender is a configured owner, so the "general" agent (full capabilities) is used.
-            verify(prelo).run(eq("hello"), eq("general"), any());
+            verify(prelo).run(eq("hello"), eq("general"), any(), any());
             assertTrue(appender.list.stream().map(ILoggingEvent::getFormattedMessage)
                 .anyMatch(message -> message.contains("reply_queued") && message.contains("taskId=task-42") && !message.contains("responseHash=reply")));
         } finally {
@@ -61,7 +61,7 @@ class InboundMessageHandlerTest {
         PreloCoreClient prelo = mock(PreloCoreClient.class);
         InboundEventStore events = mock(InboundEventStore.class);
         OutboundReplyStore replies = mock(OutboundReplyStore.class);
-        when(prelo.run(anyString(), anyString(), any())).thenReturn(new PreloCoreClient.ExecutionResult("task-1", "COMPLETED", "reply", null));
+        when(prelo.run(anyString(), anyString(), any(), any())).thenReturn(new PreloCoreClient.ExecutionResult("task-1", "COMPLETED", "reply", null));
         BridgeProperties properties = new BridgeProperties("", "", "", "", "", true, "admin", List.of());
         OwnerContactStore ownerContacts = mock(OwnerContactStore.class);
         when(ownerContacts.contains("+5511999999999")).thenReturn(true);
@@ -70,6 +70,6 @@ class InboundMessageHandlerTest {
         handler.handle(new InboundMessageEvent(new InboundMessageEvent.Channel("channel-1", "WHATSAPP"),
             new InboundMessageEvent.Contact("contact-1", "+5511000000000"), new InboundMessageEvent.Message("msg", "hello", "now")));
 
-        verify(prelo).run(eq("hello"), eq("customer"), any());
+        verify(prelo).run(eq("hello"), eq("customer"), any(), any());
     }
 }

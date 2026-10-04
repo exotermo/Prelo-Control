@@ -61,7 +61,7 @@ public class InboundMessageHandler {
         // number never gets the "general" agent's capabilities (delegate_to_agent, tools) —
         // it gets "customer", which the catalog defines with none.
         String agentId = ownerContacts.contains(event.from()) ? OWNER_AGENT_ID : CUSTOMER_AGENT_ID;
-        PreloCoreClient.ExecutionResult result = preloCoreClient.run(event.text(), agentId, EXECUTION_TIMEOUT);
+        PreloCoreClient.ExecutionResult result = preloCoreClient.run(event.text(), agentId, event.from(), EXECUTION_TIMEOUT);
 
         if (!"COMPLETED".equals(result.status()) || result.result() == null || result.result().isBlank()) {
             log.warn("no reply sent for message {}: prelo-core execution ended as {} ({})",
