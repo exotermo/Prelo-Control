@@ -147,7 +147,7 @@ export function TasksPage() {
   );
 }
 
-function TaskDetail({ taskId, onTaskChanged }: { taskId: string; onTaskChanged: () => void }) {
+export function TaskDetail({ taskId, onTaskChanged }: { taskId: string; onTaskChanged: () => void }) {
   const { token } = useAuth();
   const [task, setTask] = useState<Task | null>(null);
   const [execution, setExecution] = useState<Execution | null>(null);

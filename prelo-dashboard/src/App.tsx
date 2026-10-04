@@ -8,10 +8,14 @@ import { UsersPage } from "./pages/UsersPage";
 import { ServersPage } from "./pages/ServersPage";
 import { LoginPage } from "./pages/LoginPage";
 import { ProjectLanding } from "./pages/ProjectLanding";
+import { ClientsPage } from "./pages/ClientsPage";
+import { CommandPalette } from "./components/search/CommandPalette";
+import { openCommandPalette } from "./components/search/paletteEvents";
+import { QuickViewProvider } from "./context/QuickViewContext";
 import { AuthProvider, useAuth } from "./auth/AuthContext";
 import { ProjectProvider, useProject } from "./context/ProjectContext";
 import { decodeDashboardToken, listProjects } from "./api/client";
-import { navigate, parseProjectsPath, usePathname } from "./router";
+import { navigate, parseClientsPath, parseProjectsPath, usePathname } from "./router";
 
 type Route = "tasks" | "pipeline" | "approvals" | "servers" | "integrations" | "settings" | "users";
 
@@ -111,6 +115,9 @@ function Shell() {
           ))}
         </nav>
         <div className="app-topnav-right">
+          <button className="search-trigger" onClick={openCommandPalette} title="Buscar (Ctrl+K)">
+            Buscar <kbd className="search-kbd">Ctrl K</kbd>
+          </button>
           <button className="project-pill" onClick={() => { clearProject(); navigate("/projetos"); }} title="Trocar projeto">
             📁 {projectName} · Trocar projeto
           </button>
@@ -139,13 +146,19 @@ function Gate() {
   // /projetos/** is its own screen (project list and each project's cover), reachable with or
   // without a project selected; everything else is the in-project dashboard.
   const inProjects = parseProjectsPath(path) !== null;
+  // /clientes/** (Fase C1) is a workspace screen too, like /projetos — no project needed.
+  const inClients = parseClientsPath(path) !== null;
   useEffect(() => {
-    if (!restoring && token && !projectId && !inProjects) navigate("/projetos", { replace: true });
-  }, [restoring, token, projectId, inProjects]);
+    if (!restoring && token && !projectId && !inProjects && !inClients) navigate("/projetos", { replace: true });
+  }, [restoring, token, projectId, inProjects, inClients]);
   if (restoring) return null;
   if (!token) return <LoginPage />;
-  if (!projectId || inProjects) return <ProjectLanding />;
-  return <Shell />;
+  return (
+    <QuickViewProvider>
+      <CommandPalette token={token} />
+      {inClients ? <ClientsPage /> : !projectId || inProjects ? <ProjectLanding /> : <Shell />}
+    </QuickViewProvider>
+  );
 }
 
 function App() {

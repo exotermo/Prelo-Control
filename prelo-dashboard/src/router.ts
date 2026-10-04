@@ -30,3 +30,16 @@ export function parseProjectsPath(path: string): { projectId: string | null; sec
 }
 
 export const projectPath = (projectId: string, section: ProjectSection = "modelo") => `/projetos/${projectId}/${section}`;
+
+export type ClientSection = "visao-geral" | "linha-do-tempo" | "contatos" | "projetos";
+const CLIENT_SECTIONS: ClientSection[] = ["visao-geral", "linha-do-tempo", "contatos", "projetos"];
+
+/** Parses /clientes, /clientes/{id} and /clientes/{id}/{section}; null when outside /clientes. */
+export function parseClientsPath(path: string): { clientId: string | null; section: ClientSection } | null {
+  const parts = path.split("/").filter(Boolean);
+  if (parts[0] !== "clientes") return null;
+  const section: ClientSection = CLIENT_SECTIONS.includes(parts[2] as ClientSection) ? (parts[2] as ClientSection) : "visao-geral";
+  return { clientId: parts[1] ?? null, section };
+}
+
+export const clientPath = (clientId: string, section: ClientSection = "visao-geral") => `/clientes/${clientId}/${section}`;

@@ -389,6 +389,8 @@ export interface ProjectSummary {
   defaultAgentId: string | null;
   instructions: string | null;
   coverColor: CoverColor;
+  // Fase C1: the client this project is for.
+  clientId: string | null;
 }
 
 export interface ProjectSettingsPayload {
@@ -625,4 +627,122 @@ export function deleteWebhook(token: string, projectId: string, id: string): Pro
 
 export function sendWebhookTest(token: string, projectId: string, id: string): Promise<void> {
   return postJSON<void>(`/api/v1/integrations/webhooks/${id}/test`, undefined, token, projectId);
+}
+
+// --- Fase C1: clients (CRM), search, home (recent + pending) and the client timeline ---
+
+export type ClientStatus = "LEAD" | "ACTIVE" | "INACTIVE" | "DISCARDED";
+export type ClientStage = "NEW" | "ANALYZED" | "CONTACTED" | "REPLIED" | "QUALIFIED";
+export type ContactKind = "PHONE" | "WHATSAPP" | "EMAIL";
+
+export interface ClientContact { id: string; kind: ContactKind; value: string; isPrimary: boolean }
+
+export interface Client {
+  id: string;
+  name: string;
+  company: string | null;
+  status: ClientStatus;
+  stage: ClientStage;
+  source: "MANUAL" | "OSM" | "WHATSAPP";
+  address: string | null;
+  city: string | null;
+  website: string | null;
+  notes: string | null;
+  optedOutAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+  version: number;
+  primaryContact?: ClientContact;
+  projectCount?: number;
+  contacts?: ClientContact[];
+  projects?: ProjectSummary[];
+}
+
+export interface ClientPayload {
+  version?: number;
+  name: string;
+  company?: string | null;
+  status: ClientStatus;
+  stage?: ClientStage;
+  address?: string | null;
+  city?: string | null;
+  website?: string | null;
+  notes?: string | null;
+  contacts?: { kind: ContactKind; value: string; isPrimary?: boolean }[];
+}
+
+export function listClients(token: string, status?: ClientStatus): Promise<Client[]> {
+  return request(`/api/v1/clients${status ? `?status=${status}` : ""}`, { method: "GET" }, token);
+}
+export function getClient(token: string, clientId: string): Promise<Client> {
+  return request(`/api/v1/clients/${clientId}`, { method: "GET" }, token);
+}
+export function createClient(token: string, payload: ClientPayload): Promise<Client> {
+  return postJSON("/api/v1/clients", payload, token);
+}
+export function updateClient(token: string, clientId: string, payload: ClientPayload): Promise<Client> {
+  return request(`/api/v1/clients/${clientId}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) }, token);
+}
+export function deleteClient(token: string, clientId: string): Promise<void> {
+  return request(`/api/v1/clients/${clientId}`, { method: "DELETE" }, token);
+}
+export function addClientContact(token: string, clientId: string, contact: { kind: ContactKind; value: string; isPrimary?: boolean }): Promise<ClientContact> {
+  return postJSON(`/api/v1/clients/${clientId}/contacts`, contact, token);
+}
+export function removeClientContact(token: string, clientId: string, contactId: string): Promise<void> {
+  return request(`/api/v1/clients/${clientId}/contacts/${contactId}`, { method: "DELETE" }, token);
+}
+export function setProjectClient(token: string, projectId: string, clientId: string | null): Promise<void> {
+  return request(`/api/v1/projects/${projectId}/client`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ clientId }) }, token);
+}
+
+export interface TimelineEntry {
+  kind: "CLIENT_CREATED" | "PROJECT" | "TASK" | "FILE";
+  id: string;
+  title: string;
+  detail: string;
+  status: string;
+  projectId: string | null;
+  at: string;
+}
+export function getClientTimeline(token: string, clientId: string, before?: string): Promise<TimelineEntry[]> {
+  const query = before ? `?before=${encodeURIComponent(before)}` : "";
+  return request(`/api/v1/clients/${clientId}/timeline${query}`, { method: "GET" }, token);
+}
+
+export type SearchKind = "CLIENT" | "PROJECT" | "TASK" | "FILE";
+export interface SearchHit {
+  kind: SearchKind;
+  id: string;
+  title: string;
+  subtitle: string;
+  projectId: string | null;
+  clientId: string | null;
+  status: string;
+  at: string;
+}
+export interface SearchResults { clients: SearchHit[]; projects: SearchHit[]; tasks: SearchHit[]; files: SearchHit[] }
+
+export function search(token: string, query: string, signal?: AbortSignal): Promise<SearchResults> {
+  return request(`/api/v1/search?q=${encodeURIComponent(query)}`, { method: "GET", signal }, token);
+}
+
+export type RecentKind = "CLIENT" | "PROJECT" | "TASK";
+export interface RecentItem { kind: RecentKind; id: string; title: string; subtitle: string; status: string; projectId: string | null; viewedAt: string }
+export interface PendingItem {
+  kind: "APPROVAL" | "RUNNING" | "FAILED";
+  id: string;
+  taskId: string;
+  title: string;
+  detail: string;
+  projectId: string | null;
+  projectName: string | null;
+  at: string;
+}
+export function getHome(token: string): Promise<{ recent: RecentItem[]; pending: PendingItem[] }> {
+  return request("/api/v1/home", { method: "GET" }, token);
+}
+/** Best-effort: remembering what was opened must never break the screen that opened it. */
+export function touchRecent(token: string, kind: RecentKind, id: string): void {
+  void postJSON("/api/v1/recent", { kind, id }, token).catch(() => {});
 }

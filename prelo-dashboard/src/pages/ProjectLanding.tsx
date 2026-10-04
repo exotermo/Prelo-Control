@@ -8,6 +8,7 @@ import {
   listProjectMembers,
   listProjects,
   removeProjectMember,
+  touchRecent,
   type DashboardUserSummary,
   type ProjectMember,
   type ProjectSummary,
@@ -18,6 +19,9 @@ import { navigate, parseProjectsPath, projectPath, usePathname } from "../router
 import { ModelPanel } from "../components/model/ModelPanel";
 import { COVER_COLORS } from "../components/coverColors";
 import { useProject } from "../context/ProjectContext";
+import { WorkspaceHeader } from "../components/WorkspaceHeader";
+import { HomePanels } from "../components/HomePanels";
+import { SearchBox } from "../components/search/SearchBox";
 
 function MembersModal({ project, onClose }: { project: ProjectSummary; onClose: () => void }) {
   const { token } = useAuth();
@@ -89,7 +93,7 @@ function MembersModal({ project, onClose }: { project: ProjectSummary; onClose: 
 }
 
 export function ProjectLanding() {
-  const { token, logout } = useAuth();
+  const { token } = useAuth();
   const { selectProject } = useProject();
   const [projects, setProjects] = useState<ProjectSummary[]>([]);
   const [loading, setLoading] = useState(true);
@@ -129,6 +133,11 @@ export function ProjectLanding() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [token]);
 
+  // Fase C1: opening a project's cover is what "Continuar de onde parou" remembers.
+  useEffect(() => {
+    if (token && opened) touchRecent(token, "PROJECT", opened.id);
+  }, [token, opened?.id]); // eslint-disable-line react-hooks/exhaustive-deps
+
   async function handleCreate(event: FormEvent) {
     event.preventDefault();
     if (!name.trim() || !token) return;
@@ -149,15 +158,7 @@ export function ProjectLanding() {
 
   return (
     <div className="app-shell">
-      <header className="app-topnav">
-        <div className="brand">
-          <span className="brand-mark">P</span>
-          <h1>Prelo Control</h1>
-        </div>
-        <div className="app-topnav-right">
-          <button onClick={logout}>Sair</button>
-        </div>
-      </header>
+      <WorkspaceHeader />
       <main key={opened?.id ?? "all"} className={`app-content page-sheet ${opened ? "forward" : "backward"}`}>
       {openedId && !opened ? (
         <p className="muted">Abrindo projeto…</p>
@@ -170,7 +171,14 @@ export function ProjectLanding() {
           onDeleted={() => { navigate("/projetos"); void refresh(); }} />
       ) : (
       <>
-      <div className="page-header">
+      {token && (
+        <section className="home-search">
+          <SearchBox token={token} />
+        </section>
+      )}
+      {token && <HomePanels token={token} />}
+
+      <div className="page-header home-projects-header">
         <h2>Projetos</h2>
         <button onClick={() => void refresh()} disabled={loading}>
           {loading ? "Atualizando…" : "Atualizar"}
