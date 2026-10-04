@@ -30,10 +30,10 @@ func (r *ApprovalRepository) Insert(ctx context.Context, approval domain.Approva
 		}
 		_, err := r.pool.Exec(ctx, `
 			INSERT INTO approval_requests
-				(id, tool_call_id, scope, status, requested_at, expires_at, decided_at, decided_by, approval_version, short_code)
-			VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`,
-			approval.ID.Value, approval.ToolCallID.Value, approval.Scope, string(approval.Status),
-			approval.RequestedAt, approval.ExpiresAt, approval.DecidedAt, approval.DecidedBy, approval.Version, code)
+				(id, tool_call_id, scope, status, requested_at, expires_at, decided_at, decided_by, approval_version, short_code, action_request_id)
+			VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)`,
+			approval.ID.Value, toolCallIDValue(approval), approval.Scope, string(approval.Status),
+			approval.RequestedAt, approval.ExpiresAt, approval.DecidedAt, approval.DecidedBy, approval.Version, code, approval.ActionRequestID)
 		var pgErr *pgconn.PgError
 		if err != nil && errors.As(err, &pgErr) && pgErr.Code == "23505" && pgErr.ConstraintName == "approval_requests_pending_code_uk" && attempt < 8 {
 			approval.ShortCode = domain.NewShortCode()
@@ -69,11 +69,20 @@ func (r *ApprovalRepository) ListDuePending(ctx context.Context, limit int) ([]d
 	return out, rows.Err()
 }
 
-const approvalColumns = "id, tool_call_id, scope, status, requested_at, expires_at, decided_at, decided_by, approval_version, short_code"
+const approvalColumns = "id, tool_call_id, scope, status, requested_at, expires_at, decided_at, decided_by, approval_version, short_code, action_request_id"
+
+// toolCallIDValue writes NULL for an action approval (PR-3), whose subject is not a tool call.
+func toolCallIDValue(a domain.ApprovalRequest) *uuid.UUID {
+	if a.IsAction() || a.ToolCallID.Value == uuid.Nil {
+		return nil
+	}
+	v := a.ToolCallID.Value
+	return &v
+}
 
 func (r *ApprovalRepository) FindByID(ctx context.Context, id domain.ApprovalRequestID) (domain.ApprovalRequest, error) {
 	row := r.pool.QueryRow(ctx, `
-		SELECT id, tool_call_id, scope, status, requested_at, expires_at, decided_at, decided_by, approval_version, short_code
+		SELECT id, tool_call_id, scope, status, requested_at, expires_at, decided_at, decided_by, approval_version, short_code, action_request_id
 		  FROM approval_requests WHERE id = $1`, id.Value)
 	return scanApproval(row)
 }
@@ -99,7 +108,7 @@ func (r *ApprovalRepository) Update(ctx context.Context, approval domain.Approva
 
 func (r *ApprovalRepository) ListPending(ctx context.Context) ([]domain.ApprovalRequest, error) {
 	rows, err := r.pool.Query(ctx, `
-		SELECT id, tool_call_id, scope, status, requested_at, expires_at, decided_at, decided_by, approval_version, short_code
+		SELECT id, tool_call_id, scope, status, requested_at, expires_at, decided_at, decided_by, approval_version, short_code, action_request_id
 		  FROM approval_requests WHERE status = 'PENDING' ORDER BY requested_at`)
 	if err != nil {
 		return nil, err
@@ -122,18 +131,21 @@ func (r *ApprovalRepository) ListPending(ctx context.Context) ([]domain.Approval
 // project_id of its own, only a tool_call_id, and a ToolCall's Task is what's actually scoped.
 // nil projectID means the "unassigned" bucket (tasks.project_id IS NULL).
 func (r *ApprovalRepository) ListPendingByProject(ctx context.Context, projectID *uuid.UUID) ([]domain.ApprovalRequest, error) {
+	// Tool-call approvals reach the project through the task; action approvals (PR-3) through the
+	// action request. Either way, the same "which project" rule.
 	const base = `
-		SELECT ar.id, ar.tool_call_id, ar.scope, ar.status, ar.requested_at, ar.expires_at, ar.decided_at, ar.decided_by, ar.approval_version, ar.short_code
+		SELECT ar.id, ar.tool_call_id, ar.scope, ar.status, ar.requested_at, ar.expires_at, ar.decided_at, ar.decided_by, ar.approval_version, ar.short_code, ar.action_request_id
 		  FROM approval_requests ar
-		  JOIN tool_calls tc ON tc.id = ar.tool_call_id
-		  JOIN tasks t ON t.id = tc.task_id
+		  LEFT JOIN tool_calls tc ON tc.id = ar.tool_call_id
+		  LEFT JOIN tasks t ON t.id = tc.task_id
+		  LEFT JOIN action_requests act ON act.id = ar.action_request_id
 		 WHERE ar.status = 'PENDING'`
 	var rows pgx.Rows
 	var err error
 	if projectID == nil {
-		rows, err = r.pool.Query(ctx, base+" AND t.project_id IS NULL ORDER BY ar.requested_at")
+		rows, err = r.pool.Query(ctx, base+" AND ar.tool_call_id IS NOT NULL AND t.project_id IS NULL ORDER BY ar.requested_at")
 	} else {
-		rows, err = r.pool.Query(ctx, base+" AND t.project_id = $1 ORDER BY ar.requested_at", *projectID)
+		rows, err = r.pool.Query(ctx, base+" AND coalesce(t.project_id, act.project_id) = $1 ORDER BY ar.requested_at", *projectID)
 	}
 	if err != nil {
 		return nil, err
@@ -155,8 +167,9 @@ func scanApproval(row pgx.Row) (domain.ApprovalRequest, error) {
 	var a domain.ApprovalRequest
 	var status string
 	var code *string
-	if err := row.Scan(&a.ID.Value, &a.ToolCallID.Value, &a.Scope, &status, &a.RequestedAt,
-		&a.ExpiresAt, &a.DecidedAt, &a.DecidedBy, &a.Version, &code); err != nil {
+	var toolCallID *uuid.UUID
+	if err := row.Scan(&a.ID.Value, &toolCallID, &a.Scope, &status, &a.RequestedAt,
+		&a.ExpiresAt, &a.DecidedAt, &a.DecidedBy, &a.Version, &code, &a.ActionRequestID); err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return domain.ApprovalRequest{}, application.ErrApprovalNotFound
 		}
@@ -165,6 +178,9 @@ func scanApproval(row pgx.Row) (domain.ApprovalRequest, error) {
 	a.Status = domain.ApprovalStatus(status)
 	if code != nil {
 		a.ShortCode = *code
+	}
+	if toolCallID != nil {
+		a.ToolCallID.Value = *toolCallID
 	}
 	return a, nil
 }

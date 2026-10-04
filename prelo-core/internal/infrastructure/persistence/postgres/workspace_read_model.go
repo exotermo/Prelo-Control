@@ -189,15 +189,19 @@ func (m *WorkspaceReadModel) ListPending(ctx context.Context, v application.Proj
 	all, ids := visibilityArgs(v)
 	rows, err := m.pool.Query(ctx, `
 		SELECT kind, id, task_id, title, detail, project_id, project_name, at FROM (
-		  SELECT 'APPROVAL' AS kind, ar.id, t.id AS task_id, left(t.description, 160) AS title,
-		         tc.tool_name || ' · risco ' || lower(tc.risk_level) AS detail,
-		         t.project_id, p.name AS project_name, ar.requested_at AS at, 0 AS rank
+		  SELECT 'APPROVAL' AS kind, ar.id, coalesce(t.id, act.id) AS task_id,
+		         coalesce(left(t.description, 160),
+		                  'Deploy de ' || (act.payload->>'repository') || '@' || left(act.payload->>'commitSha', 7) || ' → ' || (act.payload->>'environment')) AS title,
+		         coalesce(tc.tool_name || ' · risco ' || lower(tc.risk_level), 'pedido externo · risco ' || lower(act.risk) || ' · código ' || ar.short_code) AS detail,
+		         coalesce(t.project_id, act.project_id) AS project_id, p.name AS project_name, ar.requested_at AS at, 0 AS rank
 		    FROM approval_requests ar
-		    JOIN tool_calls tc ON tc.id = ar.tool_call_id
-		    JOIN tasks t ON t.id = tc.task_id
-		    LEFT JOIN projects p ON p.id = t.project_id
+		    LEFT JOIN tool_calls tc ON tc.id = ar.tool_call_id
+		    LEFT JOIN tasks t ON t.id = tc.task_id
+		    LEFT JOIN action_requests act ON act.id = ar.action_request_id
+		    LEFT JOIN projects p ON p.id = coalesce(t.project_id, act.project_id)
 		   WHERE ar.status = 'PENDING' AND ar.expires_at > now()
-		     AND ($1 OR t.project_id IS NULL OR t.project_id = ANY($2))
+		     AND (t.id IS NOT NULL OR act.id IS NOT NULL)
+		     AND ($1 OR (act.id IS NULL AND t.project_id IS NULL) OR coalesce(t.project_id, act.project_id) = ANY($2))
 		  UNION ALL
 		  SELECT 'RUNNING', t.id, t.id, left(t.description, 160), t.agent_id || ' · ' || lower(t.status),
 		         t.project_id, p.name, t.created_at, 1

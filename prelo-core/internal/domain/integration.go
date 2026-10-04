@@ -27,6 +27,8 @@ const MaxIntegrationNameLength = 120
 // something an integration can be granted.
 var ApiKeyAllowedScopes = map[string]bool{
 	"tasks:create": true, "tasks:read": true, "tasks:execute": true, "observability:read": true,
+	// PR-3: an executor (BastionDeploy) asks for authorization and reports results — never decides.
+	"actions:request": true, "actions:report": true,
 }
 
 // ApiKey is a Prelo-issued credential for an external app (Fase I). Only KeyHash is stored —
@@ -84,12 +86,15 @@ const (
 	EventApprovalPending = "approval.pending"
 	EventServerOffline   = "server.offline"
 	EventWebhookTest     = "webhook.test"
+	// EventActionDecided (PR-3): an external action request was approved, denied or expired.
+	EventActionDecided = "action.decided"
 )
 
 // WebhookSubscribableEvents is what a webhook can subscribe to; webhook.test is sent only on
 // explicit request and reaches a webhook regardless of its subscriptions.
 var WebhookSubscribableEvents = map[string]bool{
 	EventTaskCompleted: true, EventTaskFailed: true, EventApprovalPending: true, EventServerOffline: true,
+	EventActionDecided: true,
 }
 
 // Webhook is an outbound notification target for one Project (Fase I). EncryptedSecret signs

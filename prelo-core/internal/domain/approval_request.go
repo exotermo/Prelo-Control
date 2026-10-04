@@ -41,7 +41,21 @@ type ApprovalRequest struct {
 	Version     int64
 	// ShortCode (Fase T) identifies the request in a WhatsApp answer ("SIM K7Q2").
 	ShortCode string
+	// ActionRequestID (PR-3): set when the approval is for an external action request instead of
+	// an agent's tool call — exactly one of the two subjects (ToolCallID is zero then).
+	ActionRequestID *uuid.UUID
 }
+
+// NewActionApproval (PR-3) is the approval of an external action request.
+func NewActionApproval(actionRequestID uuid.UUID, scope string, ttl time.Duration) ApprovalRequest {
+	a := NewApprovalRequest(ToolCallID{}, scope, ttl)
+	id := actionRequestID
+	a.ActionRequestID = &id
+	return a
+}
+
+// IsAction: this approval authorizes an external action, not a tool call.
+func (a ApprovalRequest) IsAction() bool { return a.ActionRequestID != nil }
 
 // shortCodeAlphabet has no look-alikes (0/O, 1/I/L, 5/S, 8/B, 2/Z) — the owner types it on a phone.
 const shortCodeAlphabet = "ACDEFGHJKMNPQRTUVWXY3479"

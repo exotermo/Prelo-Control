@@ -19,6 +19,7 @@ import (
 // delegate_to_agent (Fase C): approving it only creates the child Task — the parent execution
 // must stay suspended (now waiting on the child, not the approval) until that child finishes.
 type DecideApprovalUseCase struct {
+	actions     actionDecisionListener
 	codes       ApprovalCodeRepository
 	approvals   ApprovalRepository
 	calls       ToolCallRepository
@@ -31,6 +32,21 @@ type DecideApprovalUseCase struct {
 
 func NewDecideApprovalUseCase(approvals ApprovalRepository, calls ToolCallRepository, tools ToolRegistry, executions ExecutionRepository, turns ExecutionTurnRepository, suspensions ExecutionSuspensionRepository, jobs ExecutionJobRepository) *DecideApprovalUseCase {
 	return &DecideApprovalUseCase{approvals: approvals, calls: calls, tools: tools, executions: executions, turns: turns, suspensions: suspensions, jobs: jobs}
+}
+
+// actionDecisionListener (PR-3) is told when an external action request's approval is decided.
+type actionDecisionListener interface {
+	OnApprovalDecided(ctx context.Context, approval domain.ApprovalRequest)
+}
+
+// SetActionListener enables PR-3: deciding an action approval runs nothing here — the external
+// system is told and executes on its side.
+func (uc *DecideApprovalUseCase) SetActionListener(actions actionDecisionListener) { uc.actions = actions }
+
+func (uc *DecideApprovalUseCase) actionDecided(ctx context.Context, approval domain.ApprovalRequest) {
+	if uc.actions != nil {
+		uc.actions.OnApprovalDecided(ctx, approval)
+	}
 }
 
 // SetCodeRepository enables Fase T's WhatsApp decisions (by short code) and expiry.
@@ -69,8 +85,14 @@ func (uc *DecideApprovalUseCase) ExpireDue(ctx context.Context) (int, error) {
 		if err != nil {
 			continue
 		}
-		if _, err := uc.approvals.Update(ctx, closed); err != nil {
+		updated, err := uc.approvals.Update(ctx, closed)
+		if err != nil {
 			continue // decided concurrently — whoever won handles the execution
+		}
+		if updated.IsAction() {
+			uc.actionDecided(ctx, updated)
+			expired++
+			continue
 		}
 		if call, err := uc.calls.FindByID(ctx, approval.ToolCallID); err == nil {
 			outcome := domain.OutcomeDenied
@@ -96,6 +118,10 @@ func (uc *DecideApprovalUseCase) Approve(ctx context.Context, id domain.Approval
 	approved, err = uc.approvals.Update(ctx, approved)
 	if err != nil {
 		return domain.ApprovalRequest{}, err
+	}
+	if approved.IsAction() {
+		uc.actionDecided(ctx, approved)
+		return approved, nil
 	}
 
 	// The ApprovalRequest is already persisted as APPROVED above — that part genuinely
@@ -165,6 +191,10 @@ func (uc *DecideApprovalUseCase) Deny(ctx context.Context, id domain.ApprovalReq
 	denied, err = uc.approvals.Update(ctx, denied)
 	if err != nil {
 		return domain.ApprovalRequest{}, err
+	}
+	if denied.IsAction() {
+		uc.actionDecided(ctx, denied)
+		return denied, nil
 	}
 
 	if call, err := uc.calls.FindByID(ctx, approval.ToolCallID); err == nil {
