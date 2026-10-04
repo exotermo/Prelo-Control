@@ -183,7 +183,10 @@ public class ConnectionService implements ConnectionRouter {
             var ping = new br.com.exotermo.prelo.gateway.llm.LLMRequest("cli-test",
                 List.of(new br.com.exotermo.prelo.gateway.llm.LLMMessage("user", "Responda apenas: ok")), null, null, List.of());
             cli.chat(provider, "default".equals(model) ? null : model, ping, properties.cliTimeout());
-            return new TestResult(true, (System.nanoTime() - started) / 1_000_000, cliModelSuggestions(provider), null);
+            // Codex reports the account's real models ("default" = its top-priority one).
+            List<String> models = new java.util.ArrayList<>(cliModelSuggestions(provider));
+            status.models().stream().filter(m -> !models.contains(m)).forEach(models::add);
+            return new TestResult(true, (System.nanoTime() - started) / 1_000_000, models, null);
         } catch (RuntimeException exception) {
             return new TestResult(false, (System.nanoTime() - started) / 1_000_000, List.of(), friendly(provider, exception));
         }
@@ -202,6 +205,10 @@ public class ConnectionService implements ConnectionRouter {
 
     private static String friendly(String provider, RuntimeException exception) {
         boolean isCli = ProviderUrlPolicy.isCli(provider);
+        String message = exception.getMessage();
+        if (isCli && message != null && message.startsWith(CliRunnerClient.RUNNER_MESSAGE)) {
+            return message.substring(CliRunnerClient.RUNNER_MESSAGE.length());
+        }
         return switch (exception) {
             case ProviderAuthenticationException ignored when isCli -> "o CLI não está logado (ou o login expirou) — faça login de novo no cli-runner";
             case ProviderQuotaExceededException ignored when isCli -> "o limite do seu plano foi atingido — tente de novo mais tarde";

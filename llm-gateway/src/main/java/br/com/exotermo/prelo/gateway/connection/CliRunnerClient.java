@@ -22,7 +22,9 @@ import java.util.UUID;
  * text-only model. No provider key ever passes through here — the CLIs hold their own logins.
  */
 class CliRunnerClient {
-    record EngineStatus(boolean loggedIn, String loginCommand) { }
+    record EngineStatus(boolean loggedIn, String loginCommand, List<String> models) {
+        EngineStatus(boolean loggedIn, String loginCommand) { this(loggedIn, loginCommand, List.of()); }
+    }
 
     private final HttpClient http;
     private final ObjectMapper json;
@@ -45,7 +47,12 @@ class CliRunnerClient {
     EngineStatus status(String provider) {
         JsonNode body = send(HttpRequest.newBuilder(URI.create(baseUrl + "/v1/status")).timeout(Duration.ofSeconds(20)).GET(), provider);
         JsonNode engine = body.path(engineOf(provider));
-        return new EngineStatus(engine.path("loggedIn").asBoolean(false), engine.path("login").asText(""));
+        List<String> models = new java.util.ArrayList<>();
+        for (JsonNode m : engine.path("models")) {
+            String id = m.path("id").asText("");
+            if (!id.isBlank()) models.add(id);
+        }
+        return new EngineStatus(engine.path("loggedIn").asBoolean(false), engine.path("login").asText(""), models);
     }
 
     LLMResponse chat(String provider, String model, LLMRequest request, Duration timeout) {
@@ -71,6 +78,17 @@ class CliRunnerClient {
             body.path("durationMs").asLong(0), null, List.of());
     }
 
+    static final String RUNNER_MESSAGE = "cli-runner: ";
+
+    private String runnerMessage(String body) {
+        try {
+            String message = json.readTree(body).path("message").asText("");
+            return message.isBlank() || message.length() > 280 ? null : RUNNER_MESSAGE + message;
+        } catch (IOException | RuntimeException exception) {
+            return null;
+        }
+    }
+
     private JsonNode send(HttpRequest.Builder builder, String provider) {
         HttpResponse<String> response;
         try {
@@ -82,6 +100,13 @@ class CliRunnerClient {
             throw new ProviderUnavailableException("cli-runner is unreachable");
         }
         int status = response.statusCode();
+        // The runner's message is ours (Portuguese, no upstream data) — carried with a marker so
+        // ConnectionService can show it as-is instead of a generic provider error.
+        String reason = runnerMessage(response.body());
+        if (status == 402) throw new ProviderQuotaExceededException(reason);
+        if (status == 401 && reason != null) throw new ProviderAuthenticationException(reason);
+        if (status == 429 && reason != null) throw new ProviderQuotaExceededException(reason);
+        if (status >= 500 && reason != null && status != 504) throw new ProviderUnavailableException(reason);
         if (status == 401) {
             // Either the runner token is wrong (ops error) or the CLI itself is logged out.
             throw new ProviderAuthenticationException(provider + " is not logged in");
