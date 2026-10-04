@@ -5,9 +5,9 @@ COPY src src
 RUN mvn -B package
 
 FROM eclipse-temurin:21-jre-alpine
-RUN addgroup -S hermes && adduser -S hermes -G hermes
+RUN addgroup -S prelo && adduser -S prelo -G prelo
 WORKDIR /app
-COPY --from=build --chown=hermes:hermes /workspace/target/llm-gateway-*.jar app.jar
-USER hermes
+COPY --from=build --chown=prelo:prelo /workspace/target/llm-gateway-*.jar app.jar
+USER prelo
 EXPOSE 8081
 ENTRYPOINT ["java", "-jar", "/app/app.jar"]

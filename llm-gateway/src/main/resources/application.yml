@@ -22,7 +22,7 @@ management:
 gateway:
   jwt:
     secret: ${GATEWAY_JWT_SECRET}
-    issuer: ${GATEWAY_JWT_ISSUER:hermes-dev}
+    issuer: ${GATEWAY_JWT_ISSUER:prelo-dev}
     audience: ${GATEWAY_JWT_AUDIENCE:llm-gateway}
   provider:
     mock:
