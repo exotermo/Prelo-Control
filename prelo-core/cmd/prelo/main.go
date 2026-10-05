@@ -21,6 +21,7 @@ import (
 	appgateway "github.com/exotermo/prelo-core/internal/infrastructure/gateway"
 	"github.com/exotermo/prelo-core/internal/infrastructure/mail"
 	"github.com/exotermo/prelo-core/internal/infrastructure/persistence/postgres"
+	"github.com/exotermo/prelo-core/internal/infrastructure/push"
 	"github.com/exotermo/prelo-core/internal/infrastructure/queue"
 	"github.com/exotermo/prelo-core/internal/infrastructure/realtime"
 	"github.com/exotermo/prelo-core/internal/infrastructure/security"
@@ -232,6 +233,18 @@ func main() {
 		hub := realtime.NewHub()
 		go hub.Listen(ctx, pool)
 		api.RegisterEventsRoutes(mux, api.NewEventsHandler(hub, projectMemberRepo, mobileSessions))
+		// G11: pushes to the app (FCM). Off until the Firebase service-account file is mounted.
+		fcmAccount, err := push.LoadServiceAccount(cfg.Push.CredentialsFile)
+		if err != nil {
+			log.Fatalf("invalid PRELO_FCM_CREDENTIALS_FILE: %v", err)
+		}
+		if fcmAccount != nil {
+			go push.NewNotifier(hub, mobileSessions, push.NewFCMClient(fcmAccount)).Run(ctx)
+			log.Printf("push: FCM on (Firebase project %s)", fcmAccount.ProjectID)
+		} else {
+			log.Printf("push: FCM off (PRELO_FCM_CREDENTIALS_FILE not set or empty)")
+		}
+		api.RegisterPushRoutes(mux, api.NewPushHandler(mobileSessions, fcmAccount != nil))
 
 		// Fase C1: clients (CRM), search, home (recent + pending) and client timeline.
 		clientRepo := postgres.NewClientRepository(pool)
