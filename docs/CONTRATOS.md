@@ -128,6 +128,6 @@ conexão por API da instância (ou o modelo simulado).
 | G8 | Ações/deploys por projeto (leitura) | **implementado** (PR-3) — `GET /api/v1/projects/{id}/actions` | PR-3 ✔ |
 | G9 | Confirmação com TOTP para aprovar ALTO pelo app | **implementado** (PR-2) — `totpCode` no approve | PR-2 ✔ |
 | G10 | Ferramenta `request_deploy` (agente pede; aprovação é a do G5) | depende da proposta P-1 ao Bastion (`integracoes/PROPOSTAS.md`) | aguardando |
-| G11 | Push no celular (sem dados sensíveis) | a especificar | PR-4 |
+| G11 | Push no celular (sem dados sensíveis) | **implementado no servidor** (PR-4, FCM; desligado até montar a conta de serviço) — `integracoes/push.md` | PR-4 ✔ |
 
-Pendentes: G10 (aguarda P-1 no Bastion) e G11 (push; decisão sobre Firebase).
+Pendente: G10 (aguarda P-1 no Bastion).
