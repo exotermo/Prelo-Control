@@ -21,6 +21,13 @@ type Config struct {
 	Servers      ServersConfig
 	Integrations IntegrationsConfig
 	Files        FilesConfig
+	Push         PushConfig
+}
+
+// PushConfig backs G11 (push to the Work Control app). CredentialsFile is the path of the Firebase
+// service-account JSON (mounted read-only); unset or empty file = push off. Its content is never logged.
+type PushConfig struct {
+	CredentialsFile string
 }
 
 // FilesConfig backs Fase PA (project files sealed at rest). Key is its own 32-byte Base64 master
@@ -175,6 +182,9 @@ func Load() Config {
 		Files: FilesConfig{
 			Key: getenv("PRELO_FILES_KEY", ""),
 			Dir: getenv("PRELO_FILES_DIR", "/data/project-files"),
+		},
+		Push: PushConfig{
+			CredentialsFile: getenv("PRELO_FCM_CREDENTIALS_FILE", ""),
 		},
 		Integrations: IntegrationsConfig{
 			Key:                 getenv("PRELO_INTEGRATIONS_KEY", ""),
