@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { ApiError, approveRequest, denyRequest, listPendingApprovals, type ApprovalRequest } from "../api/client";
 import { useAuth } from "../auth/AuthContext";
 import { useProject } from "../context/ProjectContext";
+import { useLiveRefresh } from "../context/LiveEventsContext";
 
 export function ApprovalsPage() {
   const { token } = useAuth();
@@ -25,12 +26,13 @@ export function ApprovalsPage() {
     }
   }
 
+  const every = useLiveRefresh(["approval"], () => void refresh(), undefined, { live: 60000, fallback: 4000 });
   useEffect(() => {
     void refresh();
-    const interval = setInterval(() => void refresh(), 4000);
+    const interval = setInterval(() => void refresh(), every);
     return () => clearInterval(interval);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [token, projectId]);
+  }, [token, projectId, every]);
 
   async function decide(id: string, action: "approve" | "deny") {
     if (!token) return;

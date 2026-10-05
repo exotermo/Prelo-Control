@@ -3,6 +3,7 @@ import { ApiError, getHome, type PendingItem, type RecentItem } from "../api/cli
 import { useProject } from "../context/ProjectContext";
 import { useQuickView } from "../context/QuickViewContext";
 import { clientPath, navigate, projectPath } from "../router";
+import { useLiveRefresh } from "../context/LiveEventsContext";
 
 const RECENT_KICKER: Record<RecentItem["kind"], string> = { CLIENT: "Cliente", PROJECT: "Projeto", TASK: "Task" };
 const PENDING_LABEL: Record<PendingItem["kind"], { label: string; stamp: string }> = {
@@ -32,6 +33,9 @@ export function HomePanels({ token }: { token: string }) {
   const { openTask } = useQuickView();
   const { selectProject } = useProject();
 
+  // PR-4: reload on any task/approval/deploy change; polling is only the fallback.
+  const [tick, setTick] = useState(0);
+  const every = useLiveRefresh(["task", "approval", "action"], () => setTick((t) => t + 1), undefined, { live: 60000, fallback: 15000 });
   useEffect(() => {
     let cancelled = false;
     const load = () => getHome(token)
@@ -39,9 +43,9 @@ export function HomePanels({ token }: { token: string }) {
       .catch((err) => { if (!cancelled) setError(err instanceof ApiError ? err.message : "Falha ao carregar o início."); })
       .finally(() => { if (!cancelled) setLoaded(true); });
     void load();
-    const interval = setInterval(() => void load(), 15000);
+    const interval = setInterval(() => void load(), every);
     return () => { cancelled = true; clearInterval(interval); };
-  }, [token]);
+  }, [token, every, tick]);
 
   function openRecent(item: RecentItem) {
     if (item.kind === "CLIENT") navigate(clientPath(item.id));

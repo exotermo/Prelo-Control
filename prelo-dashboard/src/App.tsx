@@ -13,6 +13,7 @@ import { AccountPage } from "./pages/AccountPage";
 import { CommandPalette } from "./components/search/CommandPalette";
 import { openCommandPalette } from "./components/search/paletteEvents";
 import { QuickViewProvider } from "./context/QuickViewContext";
+import { LiveEventsProvider } from "./context/LiveEventsContext";
 import { AuthProvider, useAuth } from "./auth/AuthContext";
 import { ProjectProvider, useProject } from "./context/ProjectContext";
 import { decodeDashboardToken, listProjects } from "./api/client";
@@ -156,10 +157,12 @@ function Gate() {
   if (restoring) return null;
   if (!token) return <LoginPage />;
   return (
+    <LiveEventsProvider>
     <QuickViewProvider>
       <CommandPalette token={token} />
       {inAccount ? <AccountPage /> : inClients ? <ClientsPage /> : !projectId || inProjects ? <ProjectLanding /> : <Shell />}
     </QuickViewProvider>
+    </LiveEventsProvider>
   );
 }
 

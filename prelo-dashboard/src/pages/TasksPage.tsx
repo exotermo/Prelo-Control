@@ -17,6 +17,7 @@ import { useAuth } from "../auth/AuthContext";
 import { useProject } from "../context/ProjectContext";
 import { TaskClientBox } from "../components/TaskClientBox";
 import { PipelineTimeline } from "../components/PipelineTimeline";
+import { useLiveRefresh } from "../context/LiveEventsContext";
 
 function statusBadge(status: string) {
   return <span className={`badge badge-${status.toLowerCase()}`}>{status}</span>;
@@ -179,12 +180,14 @@ export function TaskDetail({ taskId, onTaskChanged }: { taskId: string; onTaskCh
     }
   }
 
+  const every = useLiveRefresh(["task", "execution", "approval"], () => void load(),
+    (e) => e.kind === "approval" || e.id === taskId || e.taskId === taskId || e.parentId === taskId, { live: 30000, fallback: 2500 });
   useEffect(() => {
     void load();
-    const interval = setInterval(() => void load(), 2500);
+    const interval = setInterval(() => void load(), every);
     return () => clearInterval(interval);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [taskId, token]);
+  }, [taskId, token, every]);
 
   async function handleExecute() {
     if (!token) return;

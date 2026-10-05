@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { useLiveRefresh } from "../context/LiveEventsContext";
 import { listProjectActions, type ActionRequestView } from "../api/client";
 
 const STATUS: Record<string, { label: string; stamp: string }> = {
@@ -14,14 +15,16 @@ const RESULT: Record<string, string> = {
 /** PR-3 (contrato G8): deploys requested by the BastionDeploy for this project, newest first. */
 export function DeploysPanel({ token, projectId }: { token: string; projectId: string }) {
   const [items, setItems] = useState<ActionRequestView[] | null>(null);
+  const [tick, setTick] = useState(0);
+  const every = useLiveRefresh(["approval", "action"], () => setTick((t) => t + 1), (e) => e.projectId === projectId, { live: 60000, fallback: 15000 });
 
   useEffect(() => {
     let cancelled = false;
     const load = () => listProjectActions(token, projectId, "deploy").then((list) => { if (!cancelled) setItems(list); }).catch(() => {});
     void load();
-    const timer = setInterval(() => void load(), 15000);
+    const timer = setInterval(() => void load(), every);
     return () => { cancelled = true; clearInterval(timer); };
-  }, [token, projectId]);
+  }, [token, projectId, every, tick]);
 
   if (!items || items.length === 0) return null;
   return (

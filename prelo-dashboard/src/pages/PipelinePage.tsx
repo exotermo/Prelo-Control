@@ -3,6 +3,7 @@ import { ApiError, getPipeline, type PipelineNode } from "../api/client";
 import { PipelineTree } from "../components/PipelineTree";
 import { useAuth } from "../auth/AuthContext";
 import { useProject } from "../context/ProjectContext";
+import { useLiveRefresh } from "../context/LiveEventsContext";
 
 function statusBadge(status: string) {
   return <span className={`badge badge-${status.toLowerCase()}`}>{status}</span>;
@@ -28,12 +29,14 @@ export function PipelinePage() {
     }
   }
 
+  // PR-4: instant refresh on change; polling only as a fallback (slow while the stream is live).
+  const every = useLiveRefresh(["task", "execution", "approval"], () => void refresh(), undefined, { live: 30000, fallback: 2500 });
   useEffect(() => {
     void refresh();
-    const interval = setInterval(() => void refresh(), 2500);
+    const interval = setInterval(() => void refresh(), every);
     return () => clearInterval(interval);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [token, projectId]);
+  }, [token, projectId, every]);
 
   return (
     <div>
