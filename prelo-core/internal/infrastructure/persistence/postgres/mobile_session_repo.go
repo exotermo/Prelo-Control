@@ -146,3 +146,64 @@ func (r *MobileSessionRepository) TouchTotp(ctx context.Context, id uuid.UUID, a
 	_, err := r.pool.Exec(ctx, `UPDATE mobile_sessions SET last_totp_at = $2 WHERE id = $1`, id, at)
 	return err
 }
+
+// SetPushToken (G11) stores this session's FCM token. The same token on another session (the app
+// logged in again on the same phone) is taken from it, so one device never gets a push twice.
+func (r *MobileSessionRepository) SetPushToken(ctx context.Context, sessionID uuid.UUID, token string, now time.Time) error {
+	tx, err := r.pool.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback(ctx)
+	if _, err := tx.Exec(ctx, `UPDATE mobile_sessions SET push_token = NULL, push_token_updated_at = $3
+		WHERE push_token = $1 AND id <> $2`, token, sessionID, now); err != nil {
+		return err
+	}
+	tag, err := tx.Exec(ctx, `UPDATE mobile_sessions SET push_token = $2, push_token_updated_at = $3
+		WHERE id = $1 AND revoked_at IS NULL`, sessionID, token, now)
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() == 0 {
+		return application.ErrMobileSessionNotFound
+	}
+	return tx.Commit(ctx)
+}
+
+// ClearPushToken (G11) stops pushes to this session (the app turned notifications off).
+func (r *MobileSessionRepository) ClearPushToken(ctx context.Context, sessionID uuid.UUID, now time.Time) error {
+	_, err := r.pool.Exec(ctx, `UPDATE mobile_sessions SET push_token = NULL, push_token_updated_at = $2
+		WHERE id = $1 AND push_token IS NOT NULL`, sessionID, now)
+	return err
+}
+
+// ForgetPushToken (G11) drops a token FCM reported as no longer registered (app uninstalled).
+func (r *MobileSessionRepository) ForgetPushToken(ctx context.Context, token string) error {
+	_, err := r.pool.Exec(ctx, `UPDATE mobile_sessions SET push_token = NULL, push_token_updated_at = now()
+		WHERE push_token = $1`, token)
+	return err
+}
+
+// PushTargets (G11) lists the FCM tokens of active app sessions whose user can see projectID —
+// the same rule as the event stream: ADMIN sees all, others their projects, nil project = everyone.
+func (r *MobileSessionRepository) PushTargets(ctx context.Context, projectID *uuid.UUID, now time.Time) ([]string, error) {
+	rows, err := r.pool.Query(ctx, `SELECT s.push_token FROM mobile_sessions s
+		JOIN dashboard_users u ON u.id = s.user_id
+		WHERE s.push_token IS NOT NULL AND s.revoked_at IS NULL
+		  AND s.idle_expires_at > $2 AND s.absolute_expires_at > $2
+		  AND ($1::uuid IS NULL OR u.role = 'ADMIN' OR EXISTS (
+		        SELECT 1 FROM project_members m WHERE m.project_id = $1 AND m.dashboard_user_id = u.id))`, projectID, now)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var tokens []string
+	for rows.Next() {
+		var t string
+		if err := rows.Scan(&t); err != nil {
+			return nil, err
+		}
+		tokens = append(tokens, t)
+	}
+	return tokens, rows.Err()
+}
