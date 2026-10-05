@@ -121,13 +121,13 @@ conexão por API da instância (ou o modelo simulado).
 | G1 | Workspace | **implementado** (PR-1) — `workspaceId` em `/me` | PR-1 ✔ |
 | G2 | Sessão do app (refresh no corpo, por dispositivo, rotação, revogação) | **implementado** (PR-2) — `integracoes/sessao-mobile.md` | PR-2 ✔ |
 | G3 | `GET /api/v1/me` | **implementado** (PR-1) — seção 2 | PR-1 ✔ |
-| G4 | Tempo real | v1 polling; v2 SSE `GET /api/v1/events/stream` (a especificar) | PR-4 |
+| G4 | Tempo real | **implementado** (PR-4) — `integracoes/eventos-tempo-real.md` | PR-4 ✔ |
 | G5 | Pedido de ação externa | **implementado** (PR-3) — `integracoes/action-requests.md` | PR-3 ✔ |
 | G6 | Decisão de volta (`action.decided` + `GET`) | **implementado** (PR-3) — envelope padrão de webhook (v1.1) | PR-3 ✔ |
 | G7 | Resultado da execução | **implementado** (PR-3) | PR-3 ✔ |
 | G8 | Ações/deploys por projeto (leitura) | **implementado** (PR-3) — `GET /api/v1/projects/{id}/actions` | PR-3 ✔ |
 | G9 | Confirmação com TOTP para aprovar ALTO pelo app | **implementado** (PR-2) — `totpCode` no approve | PR-2 ✔ |
-| G10 | Ferramenta `request_deploy` (agente pede; aprovação é a do G5) | a especificar com a API do Bastion | PR-4 |
+| G10 | Ferramenta `request_deploy` (agente pede; aprovação é a do G5) | depende da proposta P-1 ao Bastion (`integracoes/PROPOSTAS.md`) | aguardando |
 | G11 | Push no celular (sem dados sensíveis) | a especificar | PR-4 |
 
-Enquanto não existem (G4, G10, G11): o Work Control usa polling.
+Pendentes: G10 (aguarda P-1 no Bastion) e G11 (push; decisão sobre Firebase).
