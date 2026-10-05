@@ -22,6 +22,7 @@ import (
 	"github.com/exotermo/prelo-core/internal/infrastructure/mail"
 	"github.com/exotermo/prelo-core/internal/infrastructure/persistence/postgres"
 	"github.com/exotermo/prelo-core/internal/infrastructure/queue"
+	"github.com/exotermo/prelo-core/internal/infrastructure/realtime"
 	"github.com/exotermo/prelo-core/internal/infrastructure/security"
 	serverssh "github.com/exotermo/prelo-core/internal/infrastructure/ssh"
 	"github.com/exotermo/prelo-core/internal/infrastructure/toolregistry"
@@ -227,6 +228,10 @@ func main() {
 		api.RegisterMobileSessionRoutes(mux, api.NewMobileSessionHandler(dashboardAuthService, mobileSessions))
 		approvalHandler.SetStepUp(application.NewStepUpPolicy(approvalRepo, toolCallRepo, mobileSessions, dashboardAuthService))
 		mobileSessionsForAuth = mobileSessions
+		// PR-4 (contratos G4): Postgres change notifications → SSE for the web and the app.
+		hub := realtime.NewHub()
+		go hub.Listen(ctx, pool)
+		api.RegisterEventsRoutes(mux, api.NewEventsHandler(hub, projectMemberRepo, mobileSessions))
 
 		// Fase C1: clients (CRM), search, home (recent + pending) and client timeline.
 		clientRepo := postgres.NewClientRepository(pool)

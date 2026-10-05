@@ -371,6 +371,10 @@ func requiredScope(method, path string) string {
 		}
 		return "actions:request"
 	}
+	// PR-4 (contratos G4): the change stream, for any person's session.
+	if path == "/api/v1/events/stream" {
+		return "projects:read"
+	}
 	// PR-1 (contratos G3): any person's session — both roles carry projects:read; integration
 	// keys and technical tokens don't, so they get 403 before reaching the handler.
 	if path == "/api/v1/me" || strings.HasPrefix(path, "/api/v1/me/") {
