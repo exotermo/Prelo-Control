@@ -206,6 +206,9 @@ services:
       # DEV ONLY: lets webhooks target private/loopback addresses and plain http:// (turns off
       # the SSRF guard). Must stay false anywhere real.
       PRELO_WEBHOOK_ALLOW_PRIVATE_TARGETS: ${PRELO_WEBHOOK_ALLOW_PRIVATE_TARGETS:-false}
+      # G11: push to the Work Control app (FCM). The service-account JSON is mounted read-only below;
+      # while PRELO_FCM_SERVICE_ACCOUNT_FILE is unset the mount is /dev/null and push stays off.
+      PRELO_FCM_CREDENTIALS_FILE: /run/secrets/fcm-service-account.json
     depends_on:
       postgres:
         condition: service_healthy
@@ -215,6 +218,7 @@ services:
         condition: service_healthy
     volumes:
       - project_files:/data/project-files
+      - ${PRELO_FCM_SERVICE_ACCOUNT_FILE:-/dev/null}:/run/secrets/fcm-service-account.json:ro
     ports:
       - "127.0.0.1:8082:8080"
     networks:
