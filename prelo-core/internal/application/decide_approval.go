@@ -41,7 +41,9 @@ type actionDecisionListener interface {
 
 // SetActionListener enables PR-3: deciding an action approval runs nothing here — the external
 // system is told and executes on its side.
-func (uc *DecideApprovalUseCase) SetActionListener(actions actionDecisionListener) { uc.actions = actions }
+func (uc *DecideApprovalUseCase) SetActionListener(actions actionDecisionListener) {
+	uc.actions = actions
+}
 
 func (uc *DecideApprovalUseCase) actionDecided(ctx context.Context, approval domain.ApprovalRequest) {
 	if uc.actions != nil {

@@ -26,11 +26,15 @@ type fakeClients struct {
 	updated  *domain.Client
 }
 
-func (f *fakeClients) FindByID(context.Context, domain.ClientID) (domain.Client, error) { return f.client, nil }
+func (f *fakeClients) FindByID(context.Context, domain.ClientID) (domain.Client, error) {
+	return f.client, nil
+}
 func (f *fakeClients) ListContacts(context.Context, domain.ClientID) ([]domain.ClientContact, error) {
 	return f.contacts, nil
 }
-func (f *fakeClients) ListProjects(context.Context, domain.ClientID) ([]domain.Project, error) { return nil, nil }
+func (f *fakeClients) ListProjects(context.Context, domain.ClientID) ([]domain.Project, error) {
+	return nil, nil
+}
 func (f *fakeClients) Update(_ context.Context, c domain.Client) (domain.Client, error) {
 	f.updated = &c
 	return c, nil
@@ -125,7 +129,9 @@ func (f fakeServers) FindByID(_ context.Context, id domain.ServerID) (domain.Ser
 	}
 	return s, nil
 }
-func (f fakeServers) ListByProject(context.Context, *uuid.UUID) ([]domain.Server, error) { return nil, nil }
+func (f fakeServers) ListByProject(context.Context, *uuid.UUID) ([]domain.Server, error) {
+	return nil, nil
+}
 
 type fakeHealth struct{ called bool }
 

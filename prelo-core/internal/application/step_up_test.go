@@ -25,7 +25,9 @@ type stepCalls struct {
 	call domain.ToolCall
 }
 
-func (f stepCalls) FindByID(context.Context, domain.ToolCallID) (domain.ToolCall, error) { return f.call, nil }
+func (f stepCalls) FindByID(context.Context, domain.ToolCallID) (domain.ToolCall, error) {
+	return f.call, nil
+}
 
 type stepSessions struct {
 	MobileSessionRepository
@@ -33,7 +35,9 @@ type stepSessions struct {
 	touched bool
 }
 
-func (f *stepSessions) FindByID(context.Context, uuid.UUID) (domain.MobileSession, error) { return f.session, nil }
+func (f *stepSessions) FindByID(context.Context, uuid.UUID) (domain.MobileSession, error) {
+	return f.session, nil
+}
 func (f *stepSessions) TouchTotp(context.Context, uuid.UUID, time.Time) error {
 	f.touched = true
 	return nil
