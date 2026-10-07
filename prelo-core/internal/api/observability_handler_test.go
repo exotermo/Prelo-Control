@@ -53,7 +53,7 @@ func TestObservabilityHandler_Turns_ReturnsLedgerInOrder(t *testing.T) {
 	execution := domain.NewPendingExecution(task.ID, agentID)
 	_ = execRepo.Insert(context.Background(), execution)
 
-	turn0 := domain.NewExecutionTurn(execution.ID, 0, domain.TurnLLMCall, "prompt")
+	turn0 := domain.NewExecutionTurn(execution.ID, 0, domain.TurnLLMCall, "prompt").WithUsage("profile-a", "GENERAL", 500, 120, 30, 900)
 	_, _ = turnRepo.Insert(context.Background(), turn0.Completed("tool_use:current_time({})"))
 	turn1 := domain.NewExecutionTurn(execution.ID, 1, domain.TurnToolCall, "current_time({})")
 	_, _ = turnRepo.Insert(context.Background(), turn1.Completed("2026-01-01T00:00:00Z"))
@@ -78,6 +78,9 @@ func TestObservabilityHandler_Turns_ReturnsLedgerInOrder(t *testing.T) {
 	}
 	if resp[0].TurnNumber != 0 || resp[1].TurnNumber != 1 {
 		t.Fatalf("expected turns ordered by turn number, got %+v", resp)
+	}
+	if resp[0].Usage == nil || resp[0].Usage.InputTokens != 120 || resp[0].Usage.DurationMs != 900 || resp[1].Usage != nil {
+		t.Fatalf("aggregate usage should appear only for measured LLM calls: %+v", resp)
 	}
 }
 
