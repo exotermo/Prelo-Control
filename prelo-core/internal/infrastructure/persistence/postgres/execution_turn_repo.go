@@ -26,10 +26,12 @@ func NewExecutionTurnRepository(pool *pgxpool.Pool) *ExecutionTurnRepository {
 func (r *ExecutionTurnRepository) Insert(ctx context.Context, turn domain.ExecutionTurn) (domain.ExecutionTurn, error) {
 	_, err := r.pool.Exec(ctx, `
 		INSERT INTO execution_turns
-			(id, execution_id, turn_number, kind, request_id, input, output, error, started_at, completed_at)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`,
+			(id, execution_id, turn_number, kind, request_id, input, output, error, started_at, completed_at,
+			 model_profile,task_kind,estimated_context_tokens,input_tokens,output_tokens,duration_ms)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,NULLIF($11,''),NULLIF($12,''),NULLIF($13,0),NULLIF($14,0),NULLIF($15,0),NULLIF($16,0))`,
 		turn.ID.Value, turn.ExecutionID.Value, turn.TurnNumber, string(turn.Kind), turn.RequestID,
-		turn.Input, turn.Output, turn.Error, turn.StartedAt, turn.CompletedAt)
+		turn.Input, turn.Output, turn.Error, turn.StartedAt, turn.CompletedAt, turn.ModelProfile, turn.TaskKind,
+		turn.EstimatedContextTokens, turn.InputTokens, turn.OutputTokens, turn.DurationMs)
 	if err != nil {
 		return domain.ExecutionTurn{}, err
 	}
@@ -38,9 +40,12 @@ func (r *ExecutionTurnRepository) Insert(ctx context.Context, turn domain.Execut
 
 func (r *ExecutionTurnRepository) Update(ctx context.Context, turn domain.ExecutionTurn) (domain.ExecutionTurn, error) {
 	_, err := r.pool.Exec(ctx, `
-		UPDATE execution_turns SET output = $2, error = $3, completed_at = $4
+		UPDATE execution_turns SET output = $2, error = $3, completed_at = $4,
+			model_profile=NULLIF($5,''),task_kind=NULLIF($6,''),estimated_context_tokens=NULLIF($7,0),
+			input_tokens=NULLIF($8,0),output_tokens=NULLIF($9,0),duration_ms=NULLIF($10,0)
 		 WHERE id = $1`,
-		turn.ID.Value, turn.Output, turn.Error, turn.CompletedAt)
+		turn.ID.Value, turn.Output, turn.Error, turn.CompletedAt, turn.ModelProfile, turn.TaskKind,
+		turn.EstimatedContextTokens, turn.InputTokens, turn.OutputTokens, turn.DurationMs)
 	if err != nil {
 		return domain.ExecutionTurn{}, err
 	}
@@ -49,7 +54,9 @@ func (r *ExecutionTurnRepository) Update(ctx context.Context, turn domain.Execut
 
 func (r *ExecutionTurnRepository) ListByExecution(ctx context.Context, executionID domain.ExecutionID) ([]domain.ExecutionTurn, error) {
 	rows, err := r.pool.Query(ctx, `
-		SELECT id, execution_id, turn_number, kind, request_id, input, output, error, started_at, completed_at
+		SELECT id, execution_id, turn_number, kind, request_id, input, output, error, started_at, completed_at,
+		       coalesce(model_profile,''),coalesce(task_kind,''),coalesce(estimated_context_tokens,0),coalesce(input_tokens,0),
+	       coalesce(output_tokens,0),coalesce(duration_ms,0)
 		  FROM execution_turns WHERE execution_id = $1 ORDER BY turn_number`, executionID.Value)
 	if err != nil {
 		return nil, err
@@ -69,7 +76,9 @@ func (r *ExecutionTurnRepository) ListByExecution(ctx context.Context, execution
 
 func (r *ExecutionTurnRepository) FindByRequestID(ctx context.Context, requestID string) (domain.ExecutionTurn, bool, error) {
 	row := r.pool.QueryRow(ctx, `
-		SELECT id, execution_id, turn_number, kind, request_id, input, output, error, started_at, completed_at
+		SELECT id, execution_id, turn_number, kind, request_id, input, output, error, started_at, completed_at,
+	       coalesce(model_profile,''),coalesce(task_kind,''),coalesce(estimated_context_tokens,0),coalesce(input_tokens,0),
+	       coalesce(output_tokens,0),coalesce(duration_ms,0)
 		  FROM execution_turns WHERE request_id = $1`, requestID)
 	turn, err := scanTurn(row)
 	if err != nil {
@@ -85,7 +94,8 @@ func scanTurn(row pgx.Row) (domain.ExecutionTurn, error) {
 	var t domain.ExecutionTurn
 	var kind string
 	if err := row.Scan(&t.ID.Value, &t.ExecutionID.Value, &t.TurnNumber, &kind, &t.RequestID,
-		&t.Input, &t.Output, &t.Error, &t.StartedAt, &t.CompletedAt); err != nil {
+		&t.Input, &t.Output, &t.Error, &t.StartedAt, &t.CompletedAt, &t.ModelProfile, &t.TaskKind,
+		&t.EstimatedContextTokens, &t.InputTokens, &t.OutputTokens, &t.DurationMs); err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return domain.ExecutionTurn{}, application.ErrExecutionTurnNotFound
 		}
