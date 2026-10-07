@@ -44,6 +44,13 @@ type ExecutionTurn struct {
 	Error       *string
 	StartedAt   time.Time
 	CompletedAt *time.Time
+	// Aggregate Gateway telemetry used by estimates; never a copy of prompts or completions.
+	ModelProfile           string
+	TaskKind               string
+	EstimatedContextTokens int
+	InputTokens            int
+	OutputTokens           int
+	DurationMs             int64
 }
 
 // TurnRequestID is the deterministic idempotency key for one turn — see ExecutionTurn's doc.
@@ -69,5 +76,15 @@ func (t ExecutionTurn) Failed(errMsg string) ExecutionTurn {
 	now := time.Now().UTC()
 	t.Error = &errMsg
 	t.CompletedAt = &now
+	return t
+}
+
+func (t ExecutionTurn) WithUsage(profile, taskKind string, estimatedContextTokens, inputTokens, outputTokens int, durationMs int64) ExecutionTurn {
+	t.ModelProfile = profile
+	t.TaskKind = taskKind
+	t.EstimatedContextTokens = estimatedContextTokens
+	t.InputTokens = inputTokens
+	t.OutputTokens = outputTokens
+	t.DurationMs = durationMs
 	return t
 }
