@@ -154,7 +154,7 @@ func (m *JWTAuthMiddleware) jwtIdentity(raw, requestID string) (AuthContext, err
 
 func (m *JWTAuthMiddleware) Handler(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Method == http.MethodOptions || r.URL.Path == "/actuator/health" || isPublicDashboardAuthPath(r.URL.Path) {
+		if r.Method == http.MethodOptions || r.URL.Path == "/actuator/health" || isPublicDashboardAuthPath(r.URL.Path) || (r.Method == http.MethodPost && r.URL.Path == "/api/v1/executor-workers/heartbeat") || strings.HasPrefix(r.URL.Path, "/api/v1/executor-workers/jobs/") {
 			next.ServeHTTP(w, r)
 			return
 		}
@@ -364,6 +364,21 @@ func RequestID(ctx context.Context) string {
 }
 
 func requiredScope(method, path string) string {
+	if strings.HasPrefix(path, "/api/v1/executor-requests/") {
+		if method == http.MethodPost && (strings.HasSuffix(path, "/approve") || strings.HasSuffix(path, "/deny")) {
+			return "approvals:decide"
+		}
+		return "projects:read"
+	}
+	if strings.HasPrefix(path, "/api/v1/projects/") && strings.Contains(path, "/executor-requests") {
+		if method == http.MethodPost {
+			return "tasks:create"
+		}
+		return "projects:read"
+	}
+	if strings.HasPrefix(path, "/api/v1/executor-workers") {
+		return "settings:manage" // heartbeat authenticates its own worker credential in its handler
+	}
 	// PR-3: the executor side of external action requests (project integration keys only).
 	if strings.HasPrefix(path, "/api/v1/action-requests") {
 		if method == http.MethodPost && strings.HasSuffix(path, "/result") {
@@ -456,6 +471,8 @@ func requiredScope(method, path string) string {
 	}
 	if method == http.MethodPost {
 		switch {
+		case path == "/api/v1/tasks/estimate":
+			return "tasks:create"
 		case path == "/api/v1/tasks":
 			return "tasks:create"
 		case strings.HasSuffix(path, "/execute"):
