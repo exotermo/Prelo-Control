@@ -90,7 +90,7 @@ export function FilesPanel({ token, projectId }: { token: string; projectId: str
     }
   }
 
-  const visible = files.filter((f) => (kind === "all" || f.kind === kind) && f.name.toLowerCase().includes(query.trim().toLowerCase()));
+  const visible = files.filter((f) => (kind === "all" || f.kind === kind) && (f.relativePath ?? f.name).toLowerCase().includes(query.trim().toLowerCase()));
 
   return (
     <div className="files-panel">
@@ -150,11 +150,12 @@ export function FilesPanel({ token, projectId }: { token: string; projectId: str
         <div className="clipping-grid">
           {visible.map((file, index) => (
             <article key={file.id} className="clipping file-clipping" style={{ "--i": index } as CSSProperties}>
-              <span className="clipping-kicker">Arquivo do projeto</span>
-              <h3 className="clipping-headline file-name" title={file.name}>{file.name}</h3>
+              <span className="clipping-kicker">{file.originTaskId ? "Criado pela task" : "Arquivo do projeto"}</span>
+              <h3 className="clipping-headline file-name" title={file.relativePath ?? file.name}>{file.relativePath ?? file.name}</h3>
               <span className="clipping-dateline">Enviado em {new Date(file.createdAt).toLocaleDateString("pt-BR", { day: "2-digit", month: "short", year: "numeric" })}</span>
               <div className="clipping-body">
                 <p className="clipping-mono">{formatBytes(file.sizeBytes)} · {file.inline ? "abre aqui" : "só para baixar"}</p>
+                {file.originTaskId && <p className="clipping-mono">Task {file.originTaskId.slice(0, 8)} · Projeto atual</p>}
               </div>
               <div className="clipping-footer">
                 <span className={`clipping-stamp kind-${file.kind}`}>{KIND_LABEL[file.kind]}</span>
