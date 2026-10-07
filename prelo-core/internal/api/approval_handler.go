@@ -14,6 +14,7 @@ import (
 type ApprovalHandler struct {
 	decide    *application.DecideApprovalUseCase
 	approvals application.ApprovalRepository
+	calls     application.ToolCallRepository
 	stepUp    stepUpChecker
 }
 
@@ -22,7 +23,8 @@ type stepUpChecker interface {
 }
 
 // SetStepUp enables G9: HIGH-risk approvals from an app session need a fresh TOTP.
-func (h *ApprovalHandler) SetStepUp(stepUp stepUpChecker) { h.stepUp = stepUp }
+func (h *ApprovalHandler) SetStepUp(stepUp stepUpChecker)                    { h.stepUp = stepUp }
+func (h *ApprovalHandler) SetToolCalls(calls application.ToolCallRepository) { h.calls = calls }
 
 func NewApprovalHandler(decide *application.DecideApprovalUseCase, approvals application.ApprovalRepository) *ApprovalHandler {
 	return &ApprovalHandler{decide: decide, approvals: approvals}
@@ -83,6 +85,25 @@ func (h *ApprovalHandler) decideRequest(w http.ResponseWriter, r *http.Request, 
 	decidedBy := req.DecidedBy
 	if decidedBy == "" {
 		decidedBy = "unknown"
+	}
+	if identity, ok := FromContext(r.Context()); ok {
+		if identity.TokenUse == "dashboard" && identity.Subject != "" {
+			decidedBy = identity.Subject
+		}
+		if approving && h.calls != nil {
+			approval, findErr := h.approvals.FindByID(r.Context(), id)
+			if findErr == nil && !approval.IsAction() {
+				call, callErr := h.calls.FindByID(r.Context(), approval.ToolCallID)
+				if callErr == nil {
+					if _, isExecutor := application.ExecutorOperation(call.ToolName); isExecutor {
+						if identity.TokenUse != "dashboard" || identity.SessionID == "" {
+							writeAuthError(w, http.StatusForbidden, "executor approval requires an authenticated dashboard session")
+							return
+						}
+					}
+				}
+			}
+		}
 	}
 	if identity, ok := FromContext(r.Context()); ok && approving && identity.SessionID != "" {
 		if h.stepUp == nil {
