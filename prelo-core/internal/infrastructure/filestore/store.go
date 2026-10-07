@@ -53,7 +53,9 @@ func (s *Store) Save(id uuid.UUID, src io.Reader, maxBytes int64) (Saved, error)
 	if err != nil {
 		return Saved{}, err
 	}
-	if err := os.Rename(tmpName, s.path(id)); err != nil {
+	// Link is atomic and refuses to replace an existing sealed blob. A retried worker upload
+	// must never replace ciphertext while metadata still points to the previous salt/nonce.
+	if err := os.Link(tmpName, s.path(id)); err != nil {
 		return Saved{}, fmt.Errorf("finalize upload: %w", err)
 	}
 	return Saved{Params: params, Size: size, SHA256: sum, Head: head}, nil
