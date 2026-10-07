@@ -3,14 +3,18 @@ import {
   ApiError,
   createTask,
   executeTask,
+  estimateTask,
   getLatestExecution,
   getTask,
   getTaskTree,
   getTurns,
+  listExecutorRequests,
   listTasks,
   type Execution,
   type Task,
   type TaskTreeNode,
+  type TaskEstimate,
+  type ExecutorRequestView,
   type Turn,
 } from "../api/client";
 import { useAuth } from "../auth/AuthContext";
@@ -21,6 +25,31 @@ import { useLiveRefresh } from "../context/LiveEventsContext";
 
 function statusBadge(status: string) {
   return <span className={`badge badge-${status.toLowerCase()}`}>{status}</span>;
+}
+
+function estimateRange(range: { min: number; expected: number; max: number }, unit = "") {
+  return `${range.min.toLocaleString("pt-BR")}–${range.max.toLocaleString("pt-BR")} ${unit} (esperado ${range.expected.toLocaleString("pt-BR")})`;
+}
+
+function confidenceLabel(level: string) {
+  return level === "HIGH" ? "confiança alta" : level === "MEDIUM" ? "confiança média" : "confiança baixa";
+}
+
+function formatBytes(bytes: number) {
+  return bytes >= 1024 ** 3 ? `${(bytes / 1024 ** 3).toFixed(1)} GiB` : `${Math.round(bytes / 1024 ** 2)} MiB`;
+}
+
+function estimateFingerprint(description: string, agentId: string, projectId?: string) {
+  return `${projectId ?? "unassigned"}\u0000${agentId.trim() || "default"}\u0000${description.trim()}`;
+}
+
+function estimateStorageKey(taskId: string) { return `prelo.task-estimate.v1.${taskId}`; }
+
+function readSavedEstimate(taskId: string): TaskEstimate | null {
+  try {
+    const raw = localStorage.getItem(estimateStorageKey(taskId));
+    return raw ? JSON.parse(raw) as TaskEstimate : null;
+  } catch { return null; }
 }
 
 export function TasksPage() {
@@ -35,6 +64,32 @@ export function TasksPage() {
   const [agentId, setAgentId] = useState("");
   const [creating, setCreating] = useState(false);
   const [showMessaging, setShowMessaging] = useState(false);
+  const [estimate, setEstimate] = useState<{ fingerprint: string; value: TaskEstimate } | null>(null);
+  const [estimating, setEstimating] = useState(false);
+  const [estimateUnavailable, setEstimateUnavailable] = useState(false);
+  const currentEstimateFingerprint = estimateFingerprint(description, agentId, projectId ?? undefined);
+  const visibleEstimate = estimate?.fingerprint === currentEstimateFingerprint ? estimate.value : null;
+
+  useEffect(() => {
+    if (!token || description.trim().length < 8) {
+      setEstimate(null);
+      setEstimating(false);
+      setEstimateUnavailable(false);
+      return;
+    }
+    let cancelled = false;
+    const fingerprint = estimateFingerprint(description, agentId, projectId ?? undefined);
+    setEstimate(null);
+    const timeout = window.setTimeout(() => {
+      setEstimating(true);
+      setEstimateUnavailable(false);
+      estimateTask(token, description.trim(), agentId.trim() || undefined, projectId ?? undefined)
+        .then((value) => { if (!cancelled) setEstimate({ fingerprint, value }); })
+        .catch(() => { if (!cancelled) { setEstimate(null); setEstimateUnavailable(true); } })
+        .finally(() => { if (!cancelled) setEstimating(false); });
+    }, 450);
+    return () => { cancelled = true; window.clearTimeout(timeout); };
+  }, [token, description, agentId, projectId]);
 
   async function refresh() {
     if (!token) return;
@@ -60,7 +115,11 @@ export function TasksPage() {
     setCreating(true);
     setError(null);
     try {
+      const estimateForSubmittedTask = visibleEstimate;
       const task = await createTask(token, description.trim(), agentId.trim() || undefined, undefined, projectId ?? undefined);
+      if (estimateForSubmittedTask) {
+        try { localStorage.setItem(estimateStorageKey(task.id), JSON.stringify(estimateForSubmittedTask)); } catch { /* comparison remains a best-effort UX cache */ }
+      }
       setDescription("");
       setAgentId("");
       await refresh();
@@ -100,6 +159,45 @@ export function TasksPage() {
             Agent id (opcional — default &quot;general&quot;)
             <input value={agentId} onChange={(event) => setAgentId(event.target.value)} placeholder="general" />
           </label>
+          <section className="task-estimate" aria-live="polite" aria-label="Estimativa da task">
+            <div className="page-header"><h4>Estimativa antes de criar</h4>{estimating && <span className="muted">Calculando…</span>}</div>
+            {estimateUnavailable && <p className="muted">Estimativa temporariamente indisponível. Isso não impede a criação.</p>}
+            {visibleEstimate && <>
+              <p className="muted">Faixas aproximadas · tipo {visibleEstimate.taskKind.toLowerCase()} · perfil {visibleEstimate.modelProfile} · contexto {visibleEstimate.contextSize}. Nenhum recurso é reservado.</p>
+              <div className="task-estimate-grid">
+                <article><strong>Hardware</strong>
+                  {visibleEstimate.hardware.required ? <>
+                    <span>{visibleEstimate.hardware.profileId}: {visibleEstimate.hardware.cpuMilli ?? 0} mCPU, {formatBytes(visibleEstimate.hardware.memoryBytes ?? 0)}, {formatBytes(visibleEstimate.hardware.temporaryBytes ?? 0)} temporários</span>
+                    <span>Concorrência necessária: {estimateRange(visibleEstimate.hardware.concurrency, "container(es)")}</span>
+                    {visibleEstimate.hardware.workerCapacity ? <>
+                      <span>Worker: {visibleEstimate.hardware.workerCapacity.availableSlots}/{visibleEstimate.hardware.workerCapacity.maximumSlots} vagas · observada {new Date(visibleEstimate.hardware.workerCapacity.observedAt).toLocaleTimeString()}</span>
+                      {visibleEstimate.hardware.workerCapacity.maximumSlots === 0
+                        ? <span role="status">O worker reporta que este perfil excede sua capacidade estrutural; o pedido pode ser recusado para este host.</span>
+                        : visibleEstimate.hardware.workerCapacity.availableSlots === 0
+                          ? <span role="status">Sem vaga temporária. Se a operação for aprovada, ficará aguardando recursos do servidor.</span>
+                          : <span>Há vaga reportada agora; a admissão será reavaliada pelo servidor no momento da execução.</span>}
+                    </> : <span role="status">Sem snapshot recente do worker; capacidade não confirmada.</span>}
+                  </> : <span>Container não previsto para esta classificação inicial.</span>}
+                  <small>{confidenceLabel(visibleEstimate.hardware.confidence.level)} · {visibleEstimate.hardware.confidence.basis}</small>
+                </article>
+                <article><strong>Tokens do modelo</strong>
+                  <span>Entrada: {estimateRange(visibleEstimate.tokens.input, "tokens")}</span>
+                  <span>Saída: {estimateRange(visibleEstimate.tokens.output, "tokens")}</span>
+                  <small>{confidenceLabel(visibleEstimate.tokens.confidence.level)} · {visibleEstimate.tokens.confidence.sampleCount} amostras · {visibleEstimate.tokens.confidence.basis}</small>
+                </article>
+                <article><strong>Tempo do modelo</strong>
+                  <span>{estimateRange({ min: Math.ceil(visibleEstimate.modelTime.milliseconds.min / 1000), expected: Math.ceil(visibleEstimate.modelTime.milliseconds.expected / 1000), max: Math.ceil(visibleEstimate.modelTime.milliseconds.max / 1000) }, "seg")}</span>
+                  <small>{confidenceLabel(visibleEstimate.modelTime.confidence.level)} · {visibleEstimate.modelTime.confidence.sampleCount} amostras</small>
+                </article>
+                <article><strong>Revisão e testes humanos</strong>
+                  <span>{visibleEstimate.reviewAndTests.risk} · {estimateRange(visibleEstimate.reviewAndTests.minutes, "min")}</span>
+                  <span>Fatores: {visibleEstimate.reviewAndTests.factors.join(", ")}</span>
+                  <small>{confidenceLabel(visibleEstimate.reviewAndTests.confidence.level)} · {visibleEstimate.reviewAndTests.confidence.basis}</small>
+                </article>
+              </div>
+            </>}
+            {!visibleEstimate && !estimateUnavailable && !estimating && <p className="muted">Digite uma descrição para ver as faixas iniciais.</p>}
+          </section>
           <button type="submit" className="primary" disabled={creating}>
             {creating ? "Criando…" : "Criar task"}
           </button>
@@ -155,6 +253,8 @@ export function TaskDetail({ taskId, onTaskChanged }: { taskId: string; onTaskCh
   const [execution, setExecution] = useState<Execution | null>(null);
   const [turns, setTurns] = useState<Turn[]>([]);
   const [tree, setTree] = useState<TaskTreeNode | null>(null);
+  const [savedEstimate, setSavedEstimate] = useState<TaskEstimate | null>(null);
+  const [executorRequests, setExecutorRequests] = useState<ExecutorRequestView[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [executing, setExecuting] = useState(false);
 
@@ -165,6 +265,14 @@ export function TaskDetail({ taskId, onTaskChanged }: { taskId: string; onTaskCh
       const [taskData, treeData] = await Promise.all([getTask(token, taskId), getTaskTree(token, taskId)]);
       setTask(taskData);
       setTree(treeData);
+      setSavedEstimate(readSavedEstimate(taskId));
+      if (taskData.projectId) {
+        void listExecutorRequests(token, taskData.projectId).then((items) => {
+          setExecutorRequests(items.filter((item) => item.payload.taskId === taskId));
+        }).catch(() => setExecutorRequests([]));
+      } else {
+        setExecutorRequests([]);
+      }
       try {
         const exec = await getLatestExecution(token, taskId);
         setExecution(exec);
@@ -207,6 +315,19 @@ export function TaskDetail({ taskId, onTaskChanged }: { taskId: string; onTaskCh
   if (!task) return null;
 
   const canExecute = task.status === "CREATED";
+  const actualUsage = turns.reduce((totals, turn) => {
+    if (turn.usage) {
+      totals.input += turn.usage.inputTokens;
+      totals.output += turn.usage.outputTokens;
+      totals.duration += turn.usage.durationMs;
+      totals.calls++;
+    }
+    return totals;
+  }, { input: 0, output: 0, duration: 0, calls: 0 });
+  const capacityBlock = executorRequests.find((item) => item.jobStatus === "UNSUPPORTED_CAPACITY");
+  const capacityWait = executorRequests.find((item) => item.jobStatus === "WAITING_FOR_CAPACITY");
+  const resourceFailure = executorRequests.find((item) => item.jobResult?.code === "resource_limit_exceeded");
+  const approvalPending = executorRequests.find((item) => item.status === "PENDING");
 
   return (
     <div className="task-detail">
@@ -221,6 +342,11 @@ export function TaskDetail({ taskId, onTaskChanged }: { taskId: string; onTaskCh
       </button>
       {error && <p className="error">{error}</p>}
 
+      {capacityWait && <p className="task-capacity-status" role="status"><strong>Aguardando recursos do servidor.</strong> A task permanece na fila e será reavaliada quando houver capacidade.</p>}
+      {capacityBlock && <p className="task-capacity-status task-capacity-error" role="status"><strong>Esta task excede a capacidade máxima deste worker.</strong> {capacityBlock.jobResult?.message ?? "Divida a tarefa ou use um host mais capaz."}</p>}
+      {resourceFailure && <p className="task-capacity-status task-capacity-error" role="status"><strong>Execução interrompida por limite de memória.</strong> Não haverá repetição automática; revise/divida a task ou selecione um host mais capaz.</p>}
+      {!capacityWait && !capacityBlock && !resourceFailure && approvalPending && <p className="task-capacity-status" role="status">Aguardando aprovação administrativa para uma operação isolada.</p>}
+
       {execution && (
         <>
           <h3 style={{ marginTop: 24 }}>Execução {statusBadge(execution.status)}</h3>
@@ -231,6 +357,29 @@ export function TaskDetail({ taskId, onTaskChanged }: { taskId: string; onTaskCh
           {execution.error && <p className="error">{execution.error}</p>}
         </>
       )}
+
+      {savedEstimate && <section className="task-estimate task-estimate-comparison" aria-label="Estimativa e consumo real">
+        <h4>Estimativa × consumo observado</h4>
+        <p className="muted">A estimativa salva antes da criação é comparada com os dados medidos pelo Gateway.</p>
+        <div className="task-estimate-grid">
+          <article><strong>Tokens</strong>
+            <span>Estimado — entrada: {estimateRange(savedEstimate.tokens.input)}; saída: {estimateRange(savedEstimate.tokens.output)}</span>
+            {actualUsage.calls > 0 ? <span>Observado: entrada {actualUsage.input.toLocaleString("pt-BR")}, saída {actualUsage.output.toLocaleString("pt-BR")} tokens ({actualUsage.calls} chamadas)</span> : <span>Aguardando métricas de execução.</span>}
+          </article>
+          <article><strong>Tempo do modelo</strong>
+            <span>Estimado: {estimateRange({ min: Math.ceil(savedEstimate.modelTime.milliseconds.min / 1000), expected: Math.ceil(savedEstimate.modelTime.milliseconds.expected / 1000), max: Math.ceil(savedEstimate.modelTime.milliseconds.max / 1000) }, "seg")}</span>
+            {actualUsage.calls > 0 && <span>Observado: {(actualUsage.duration / 1000).toLocaleString("pt-BR")} seg no Gateway</span>}
+          </article>
+          <article><strong>Hardware</strong>
+            <span>Perfil estimado: {savedEstimate.hardware.profileId ?? "sem container previsto"}; concorrência {savedEstimate.hardware.concurrency.expected}</span>
+            <span>Uso real de CPU/memória/disco por execução ainda não é coletado.</span>
+          </article>
+          <article><strong>Revisão e testes</strong>
+            <span>Estimativa: {savedEstimate.reviewAndTests.risk} · {estimateRange(savedEstimate.reviewAndTests.minutes, "min")}</span>
+            <span>Tempo humano real ainda não é registrado.</span>
+          </article>
+        </div>
+      </section>}
 
       {turns.length > 0 && (
         <>
