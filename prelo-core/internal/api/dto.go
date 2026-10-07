@@ -110,6 +110,7 @@ type updateProjectRequest struct {
 
 type projectMemberResponse struct {
 	UserID  string `json:"userId"`
+	Role    string `json:"role"`
 	AddedAt string `json:"addedAt"`
 	AddedBy string `json:"addedBy"`
 }
