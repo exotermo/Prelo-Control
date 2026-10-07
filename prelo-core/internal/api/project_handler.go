@@ -116,9 +116,44 @@ func (h *ProjectHandler) ListMembers(w http.ResponseWriter, r *http.Request) {
 	}
 	response := make([]projectMemberResponse, 0, len(members))
 	for _, m := range members {
-		response = append(response, projectMemberResponse{UserID: m.UserID.String(), AddedAt: m.AddedAt.Format(time.RFC3339), AddedBy: m.AddedBy})
+		response = append(response, projectMemberResponse{UserID: m.UserID.String(), Role: m.Role, AddedAt: m.AddedAt.Format(time.RFC3339), AddedBy: m.AddedBy})
 	}
 	writeJSON(w, http.StatusOK, response)
+}
+
+func (h *ProjectHandler) SetMemberRole(w http.ResponseWriter, r *http.Request) {
+	identity, ok := FromContext(r.Context())
+	if !ok || identity.TokenUse != "dashboard" || !identity.HasScope("projects:manage") {
+		writeAuthError(w, http.StatusForbidden, "only a global administrator can assign project roles")
+		return
+	}
+	id, ok := parseProjectID(w, r)
+	if !ok {
+		return
+	}
+	userID, err := uuid.Parse(r.PathValue("userId"))
+	if err != nil {
+		writeError(w, &domain.ValidationError{Message: "invalid userId"})
+		return
+	}
+	var req struct {
+		Role string `json:"role"`
+	}
+	if !decodeJSON(w, r, &req) {
+		return
+	}
+	roles, ok := h.members.(interface {
+		SetRole(context.Context, domain.ProjectID, domain.DashboardUserID, string) error
+	})
+	if !ok {
+		writeError(w, application.ErrForbidden)
+		return
+	}
+	if err := roles.SetRole(r.Context(), id, domain.DashboardUserID{Value: userID}, req.Role); err != nil {
+		writeError(w, err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
 }
 
 func (h *ProjectHandler) AddMember(w http.ResponseWriter, r *http.Request) {
