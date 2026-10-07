@@ -8,10 +8,11 @@ import "time"
 type ProjectMember struct {
 	ProjectID ProjectID
 	UserID    DashboardUserID
+	Role      string
 	AddedAt   time.Time
 	AddedBy   string
 }
 
 func NewProjectMember(projectID ProjectID, userID DashboardUserID, addedBy string) ProjectMember {
-	return ProjectMember{ProjectID: projectID, UserID: userID, AddedAt: time.Now().UTC(), AddedBy: addedBy}
+	return ProjectMember{ProjectID: projectID, UserID: userID, Role: "MEMBER", AddedAt: time.Now().UTC(), AddedBy: addedBy}
 }
