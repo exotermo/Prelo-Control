@@ -48,12 +48,14 @@ type ToolCall struct {
 	ArgsJSON    string
 	RiskLevel   RiskLevel
 	Decision    PermissionDecision
-	Outcome     *ToolCallOutcome
-	Result      *string
-	Error       *string
-	CreatedAt   time.Time
-	ResolvedAt  *time.Time
-	Version     int64
+	// ToolPolicyVersion binds a pending approval to the project's policy generation.
+	ToolPolicyVersion int64
+	Outcome           *ToolCallOutcome
+	Result            *string
+	Error             *string
+	CreatedAt         time.Time
+	ResolvedAt        *time.Time
+	Version           int64
 }
 
 func NewToolCall(taskID TaskID, executionID ExecutionID, agentID AgentID, toolName, argsJSON string, riskLevel RiskLevel, decision PermissionDecision) ToolCall {
