@@ -7,14 +7,24 @@ import (
 )
 
 type turnResponse struct {
-	TurnNumber  int     `json:"turnNumber"`
-	Kind        string  `json:"kind"`
-	RequestID   string  `json:"requestId"`
-	Input       string  `json:"input"`
-	Output      *string `json:"output"`
-	Error       *string `json:"error"`
-	StartedAt   string  `json:"startedAt"`
-	CompletedAt *string `json:"completedAt"`
+	TurnNumber  int                `json:"turnNumber"`
+	Kind        string             `json:"kind"`
+	RequestID   string             `json:"requestId"`
+	Input       string             `json:"input"`
+	Output      *string            `json:"output"`
+	Error       *string            `json:"error"`
+	StartedAt   string             `json:"startedAt"`
+	CompletedAt *string            `json:"completedAt"`
+	Usage       *turnUsageResponse `json:"usage,omitempty"`
+}
+
+type turnUsageResponse struct {
+	ModelProfile           string `json:"modelProfile"`
+	TaskKind               string `json:"taskKind"`
+	EstimatedContextTokens int    `json:"estimatedContextTokens"`
+	InputTokens            int    `json:"inputTokens"`
+	OutputTokens           int    `json:"outputTokens"`
+	DurationMs             int64  `json:"durationMs"`
 }
 
 func turnResponseFrom(t domain.ExecutionTurn) turnResponse {
@@ -25,6 +35,10 @@ func turnResponseFrom(t domain.ExecutionTurn) turnResponse {
 	if t.CompletedAt != nil {
 		c := t.CompletedAt.Format(time.RFC3339)
 		resp.CompletedAt = &c
+	}
+	if t.Kind == domain.TurnLLMCall && t.ModelProfile != "" {
+		resp.Usage = &turnUsageResponse{ModelProfile: t.ModelProfile, TaskKind: t.TaskKind, EstimatedContextTokens: t.EstimatedContextTokens,
+			InputTokens: t.InputTokens, OutputTokens: t.OutputTokens, DurationMs: t.DurationMs}
 	}
 	return resp
 }
