@@ -30,6 +30,24 @@ func mapError(err error) (int, string, string) {
 	if errors.Is(err, application.ErrOptimisticLock) {
 		return http.StatusConflict, "concurrent_modification", "the resource was modified concurrently; retry with fresh data"
 	}
+	if errors.Is(err, application.ErrForbidden) {
+		return http.StatusForbidden, "forbidden", "the current policy does not allow this operation"
+	}
+	if errors.Is(err, application.ErrExecutorWorkerNotFound) {
+		return http.StatusNotFound, "executor_worker_not_found", "executor worker not found"
+	}
+	if errors.Is(err, application.ErrExecutorRequestNotFound) {
+		return http.StatusNotFound, "executor_request_not_found", "executor request not found"
+	}
+	if errors.Is(err, application.ErrExecutorConflict) {
+		return http.StatusConflict, "executor_conflict", "executor request, lease or result is no longer valid"
+	}
+	if errors.Is(err, application.ErrExecutorUnauthorized) {
+		return http.StatusForbidden, "executor_forbidden", "executor action is not authorized"
+	}
+	if errors.Is(err, application.ErrInvalidExecutorCapacity) {
+		return http.StatusBadRequest, "invalid_executor_capacity", "worker capacity snapshot is invalid or stale"
+	}
 	var unknownAgent *domain.ErrUnknownAgent
 	if errors.As(err, &unknownAgent) {
 		return http.StatusBadRequest, "unknown_agent", "agentId does not match any agent in the catalog"
