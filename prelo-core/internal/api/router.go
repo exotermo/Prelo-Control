@@ -5,6 +5,7 @@ import "net/http"
 // RegisterRoutes mounts the task and chat endpoints onto an existing mux, so the caller can
 // also register cross-cutting routes (like the health check) on the same mux.
 func RegisterRoutes(mux *http.ServeMux, tasks *TaskHandler, chat *ChatHandler, tools *ToolHandler, approvals *ApprovalHandler, observability *ObservabilityHandler) {
+	mux.HandleFunc("POST /api/v1/tasks/estimate", tasks.Estimate)
 	mux.HandleFunc("POST /api/v1/tasks", tasks.Create)
 	mux.HandleFunc("GET /api/v1/tasks", tasks.List)
 	mux.HandleFunc("GET /api/v1/tasks/{taskId}", tasks.Get)
@@ -94,6 +95,31 @@ func RegisterProjectFileRoutes(mux *http.ServeMux, h *ProjectFileHandler) {
 	mux.HandleFunc("DELETE /api/v1/projects/{projectId}/files/{fileId}", h.Delete)
 }
 
+// RegisterToolboxRoutes exposes effective project settings; only the human ADMIN can change them.
+func RegisterToolboxRoutes(mux *http.ServeMux, h *ToolboxHandler) {
+	mux.HandleFunc("GET /api/v1/projects/{projectId}/toolbox", h.List)
+	mux.HandleFunc("PUT /api/v1/projects/{projectId}/toolbox/{toolName}", h.Set)
+}
+
+func RegisterExecutorWorkerRoutes(mux *http.ServeMux, h *ExecutorWorkerHandler) {
+	mux.HandleFunc("POST /api/v1/executor-workers", h.Create)
+	mux.HandleFunc("GET /api/v1/executor-workers", h.List)
+	mux.HandleFunc("DELETE /api/v1/executor-workers/{workerId}", h.Revoke)
+	mux.HandleFunc("POST /api/v1/executor-workers/heartbeat", h.Heartbeat)
+}
+
+func RegisterExecutorFlowRoutes(mux *http.ServeMux, h *ExecutorFlowHandler) {
+	mux.HandleFunc("POST /api/v1/projects/{projectId}/executor-requests", h.Create)
+	mux.HandleFunc("GET /api/v1/projects/{projectId}/executor-requests", h.List)
+	mux.HandleFunc("GET /api/v1/executor-requests/{requestId}", h.Get)
+	mux.HandleFunc("POST /api/v1/executor-requests/{requestId}/approve", h.Approve)
+	mux.HandleFunc("POST /api/v1/executor-requests/{requestId}/deny", h.Deny)
+	mux.HandleFunc("POST /api/v1/executor-workers/jobs/claim", h.Claim)
+	mux.HandleFunc("GET /api/v1/executor-workers/jobs/{jobId}", h.Current)
+	mux.HandleFunc("POST /api/v1/executor-workers/jobs/{jobId}/result", h.Result)
+	mux.HandleFunc("PUT /api/v1/executor-workers/jobs/{jobId}/files/{fileId}", h.UploadFile)
+}
+
 // RegisterModelConnectionRoutes mounts Fase M's model-connection relay to the llm-gateway vault.
 // Instance routes need settings:manage; project routes need projects:read (+ membership, checked
 // in the handler) to read and projects:manage to change — see requiredScope in auth.go.
@@ -138,4 +164,5 @@ func RegisterProjectRoutes(mux *http.ServeMux, projects *ProjectHandler) {
 	mux.HandleFunc("GET /api/v1/projects/{projectId}/members", projects.ListMembers)
 	mux.HandleFunc("POST /api/v1/projects/{projectId}/members", projects.AddMember)
 	mux.HandleFunc("DELETE /api/v1/projects/{projectId}/members/{userId}", projects.RemoveMember)
+	mux.HandleFunc("PUT /api/v1/projects/{projectId}/members/{userId}/role", projects.SetMemberRole)
 }
