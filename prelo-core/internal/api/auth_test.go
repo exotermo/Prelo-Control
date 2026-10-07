@@ -117,8 +117,9 @@ func TestRequiredScopeRouteMatrix(t *testing.T) {
 	cases := map[string]string{
 		"GET /api/v1/tasks/1":                         "tasks:read",
 		"POST /api/v1/tasks":                          "tasks:create",
+		"POST /api/v1/tasks/estimate":                 "tasks:create",
 		"POST /api/v1/tasks/1/execute":                "tasks:execute",
-		"POST /api/v1/chat":                    "chat:use",
+		"POST /api/v1/chat":                           "chat:use",
 		"GET /api/v1/tools":                           "tools:read",
 		"POST /api/v1/executions/1/tools/echo/invoke": "tools:invoke",
 		"GET /api/v1/approvals":                       "approvals:read",
