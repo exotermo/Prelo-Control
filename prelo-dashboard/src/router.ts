@@ -18,8 +18,8 @@ export function navigate(path: string, options: { replace?: boolean } = {}) {
   window.dispatchEvent(new PopStateEvent("popstate"));
 }
 
-export type ProjectSection = "visao-geral" | "modelo" | "arquivos" | "configuracoes";
-const SECTIONS: ProjectSection[] = ["visao-geral", "modelo", "arquivos", "configuracoes"];
+export type ProjectSection = "visao-geral" | "modelo" | "ferramentas" | "arquivos" | "configuracoes";
+const SECTIONS: ProjectSection[] = ["visao-geral", "modelo", "ferramentas", "arquivos", "configuracoes"];
 
 /** Parses /projetos, /projetos/{id} and /projetos/{id}/{section}; null when outside /projetos. */
 export function parseProjectsPath(path: string): { projectId: string | null; section: ProjectSection } | null {
