@@ -203,6 +203,8 @@ services:
       # Fase PA: optional — project files sealed at rest (per-file HKDF key, chunked AES-256-GCM).
       # Its own 32-byte Base64 key; losing it makes every stored file unreadable — back it up.
       PRELO_FILES_KEY: ${PRELO_FILES_KEY:-}
+      # Executor APIs stay installed but cannot claim/run jobs unless explicitly enabled.
+      PRELO_EXECUTOR_ENABLED: ${PRELO_EXECUTOR_ENABLED:-false}
       # DEV ONLY: lets webhooks target private/loopback addresses and plain http:// (turns off
       # the SSRF guard). Must stay false anywhere real.
       PRELO_WEBHOOK_ALLOW_PRIVATE_TARGETS: ${PRELO_WEBHOOK_ALLOW_PRIVATE_TARGETS:-false}
