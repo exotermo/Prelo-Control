@@ -23,18 +23,18 @@ func (r *ToolCallRepository) Insert(ctx context.Context, call domain.ToolCall) e
 	_, err := r.pool.Exec(ctx, `
 		INSERT INTO tool_calls
 			(id, task_id, execution_id, agent_id, tool_name, args_json, risk_level, decision,
-			 outcome, result, error, created_at, resolved_at, call_version)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)`,
+			 outcome, result, error, created_at, resolved_at, call_version, tool_policy_version)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)`,
 		call.ID.Value, call.TaskID.Value, call.ExecutionID.Value, call.AgentID.Value, call.ToolName,
 		call.ArgsJSON, string(call.RiskLevel), string(call.Decision), outcomeOrNil(call.Outcome),
-		call.Result, call.Error, call.CreatedAt, call.ResolvedAt, call.Version)
+		call.Result, call.Error, call.CreatedAt, call.ResolvedAt, call.Version, call.ToolPolicyVersion)
 	return err
 }
 
 func (r *ToolCallRepository) FindByID(ctx context.Context, id domain.ToolCallID) (domain.ToolCall, error) {
 	row := r.pool.QueryRow(ctx, `
 		SELECT id, task_id, execution_id, agent_id, tool_name, args_json, risk_level, decision,
-		       outcome, result, error, created_at, resolved_at, call_version
+		       outcome, result, error, created_at, resolved_at, call_version, tool_policy_version
 		  FROM tool_calls WHERE id = $1`, id.Value)
 	return scanToolCall(row)
 }
@@ -76,7 +76,7 @@ func scanToolCall(row pgx.Row) (domain.ToolCall, error) {
 	var agentID string
 	if err := row.Scan(&c.ID.Value, &c.TaskID.Value, &c.ExecutionID.Value, &agentID, &c.ToolName,
 		&c.ArgsJSON, &riskLevel, &decision, &outcome, &c.Result, &c.Error, &c.CreatedAt,
-		&c.ResolvedAt, &c.Version); err != nil {
+		&c.ResolvedAt, &c.Version, &c.ToolPolicyVersion); err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return domain.ToolCall{}, application.ErrToolCallNotFound
 		}
