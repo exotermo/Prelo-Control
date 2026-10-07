@@ -29,20 +29,32 @@ func NewProjectFileHandler(files *application.ProjectFileService, projects proje
 }
 
 type projectFileResponse struct {
-	ID          string `json:"id"`
-	Name        string `json:"name"`
-	ContentType string `json:"contentType"`
-	Kind        string `json:"kind"`
-	Inline      bool   `json:"inline"`
-	SizeBytes   int64  `json:"sizeBytes"`
-	SHA256      string `json:"sha256"`
-	UploadedBy  string `json:"uploadedBy"`
-	CreatedAt   string `json:"createdAt"`
+	ID                string  `json:"id"`
+	Name              string  `json:"name"`
+	ContentType       string  `json:"contentType"`
+	Kind              string  `json:"kind"`
+	Inline            bool    `json:"inline"`
+	SizeBytes         int64   `json:"sizeBytes"`
+	SHA256            string  `json:"sha256"`
+	UploadedBy        string  `json:"uploadedBy"`
+	CreatedAt         string  `json:"createdAt"`
+	RelativePath      *string `json:"relativePath,omitempty"`
+	OriginTaskID      *string `json:"originTaskId,omitempty"`
+	OriginExecutionID *string `json:"originExecutionId,omitempty"`
 }
 
 func projectFileResponseFrom(f domain.ProjectFile) projectFileResponse {
-	return projectFileResponse{ID: f.ID.String(), Name: f.Name, ContentType: f.ContentType, Kind: f.Kind, Inline: f.Inline(),
-		SizeBytes: f.SizeBytes, SHA256: hex.EncodeToString(f.SHA256), UploadedBy: f.UploadedBy, CreatedAt: f.CreatedAt.Format(time.RFC3339)}
+	v := projectFileResponse{ID: f.ID.String(), Name: f.Name, ContentType: f.ContentType, Kind: f.Kind, Inline: f.Inline(),
+		SizeBytes: f.SizeBytes, SHA256: hex.EncodeToString(f.SHA256), UploadedBy: f.UploadedBy, CreatedAt: f.CreatedAt.Format(time.RFC3339), RelativePath: f.RelativePath}
+	if f.OriginTaskID != nil {
+		s := f.OriginTaskID.String()
+		v.OriginTaskID = &s
+	}
+	if f.OriginExecutionID != nil {
+		s := f.OriginExecutionID.String()
+		v.OriginExecutionID = &s
+	}
+	return v
 }
 
 func (h *ProjectFileHandler) List(w http.ResponseWriter, r *http.Request) {
