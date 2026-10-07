@@ -78,6 +78,7 @@ func main() {
 		manualContextRepo := postgres.NewManualContextRepository(pool)
 		snapshotRepo := postgres.NewContextSnapshotRepository(pool)
 		llmExecutionRepo := postgres.NewLlmExecutionRepository(pool)
+		taskEstimateRepo := postgres.NewTaskEstimateRepository(pool)
 
 		createTask := application.NewCreateTaskUseCase(taskRepo, manualContextRepo, agents)
 		gatewayClient := appgateway.NewClient(appgateway.Config{
@@ -114,7 +115,13 @@ func main() {
 		approvalRepo := postgres.NewApprovalRepository(pool)
 		turnRepo := postgres.NewExecutionTurnRepository(pool)
 		suspensionRepo := postgres.NewExecutionSuspensionRepository(pool)
+		toolSettings := postgres.NewProjectToolSettings(pool)
+		executorWorkerRepo := postgres.NewExecutorWorkerRepository(pool)
+		executorWorkerService := application.NewExecutorWorkerService(executorWorkerRepo)
+		executorFlow := application.NewExecutorFlow(postgres.NewExecutorRequestRepository(pool), taskRepo, executionRepo, executorWorkerRepo)
+		executorFlow.SetToolAvailability(toolSettings)
 		toolRegistry := toolregistry.NewStatic(tools.NewCurrentTimeTool(), tools.NewEchoTool(), tools.NewDelegateTool(taskRepo, agents, enqueueExecution))
+		toolRegistry.Register(tools.NewExecutorWorkspaceTools()...)
 		permissionPolicy := application.NewDefaultPermissionPolicy()
 		toolLimits := application.ToolExecutionLimits{
 			Timeout:        time.Duration(cfg.ToolLimits.TimeoutSeconds) * time.Second,
@@ -123,15 +130,21 @@ func main() {
 			MaxConcurrent:  cfg.ToolLimits.MaxConcurrent,
 		}
 		invokeTool := application.NewInvokeToolUseCaseWithLimits(executionRepo, agents, toolRegistry, permissionPolicy, toolCallRepo, approvalRepo, toolLimits)
+		invokeTool.SetExecutorFlow(executorFlow)
 		decideApproval := application.NewDecideApprovalUseCase(approvalRepo, toolCallRepo, toolRegistry, executionRepo, turnRepo, suspensionRepo, jobRepo)
+		decideApproval.SetExecutorFlow(executorFlow)
+		invokeTool.SetToolAvailability(taskRepo, toolSettings)
+		decideApproval.SetToolAvailability(taskRepo, toolSettings)
 		toolHandler := api.NewToolHandler(invokeTool, toolRegistry)
 		approvalHandler := api.NewApprovalHandler(decideApproval, approvalRepo)
+		approvalHandler.SetToolCalls(toolCallRepo)
 
 		// Fase B: the agent loop owns every Gateway call now (single-turn or multi-turn,
 		// tool-gated) — ProcessJobUseCase just claims the job and finalizes whatever the loop
 		// returns (including, per Fase C, waking up a delegating parent once its child Task
 		// finishes — see resolveParentSubtaskSuspension).
 		agentLoop := application.NewRunAgentLoopUseCase(gatewayClient, toolRegistry, invokeTool, turnRepo, suspensionRepo, jobRepo)
+		agentLoop.SetToolAvailability(toolSettings)
 		processJob := application.NewProcessJobUseCase(taskRepo, executionRepo, jobRepo, agents, contextResolver, snapshotRepo, agentLoop, turnRepo, suspensionRepo, workerID())
 
 		if stream != nil {
@@ -275,6 +288,7 @@ func main() {
 
 		// Fase PA: project settings (default agent, instructions) feed task creation and context.
 		createTask.SetProjectReader(projectRepo)
+		taskHandler.SetTaskEstimator(application.NewTaskEstimator(agents, projectRepo, taskEstimateRepo))
 		contextResolver.SetProjectReader(projectRepo)
 		var filePurger *application.ProjectFileService
 		if cfg.Files.Key == "" {
@@ -294,6 +308,22 @@ func main() {
 		}
 		// The registry also lists its catalog; the AgentRegistry port just doesn't expose it.
 		catalog, _ := agents.(agentLister)
+		executorEnabled := os.Getenv("PRELO_EXECUTOR_ENABLED") == "true" && filePurger != nil
+		executorFlow.SetEnabled(executorEnabled)
+		agentLoop.SetExecutorToolsEnabled(executorEnabled)
+		toolboxHandler := api.NewToolboxHandler(projectRepo, projectMemberRepo, toolRegistry, catalog, toolSettings)
+		toolboxHandler.SetExecutorEnabled(executorEnabled)
+		api.RegisterToolboxRoutes(mux, toolboxHandler)
+		toolboxHandler.SetExecutorWorkers(executorWorkerService)
+		workerHandler := api.NewExecutorWorkerHandler(executorWorkerService, projectRepo)
+		workerHandler.SetExecutionEnabled(executorEnabled)
+		api.RegisterExecutorWorkerRoutes(mux, workerHandler)
+		executorHandler := api.NewExecutorFlowHandler(executorFlow, executorWorkerService, projectRepo, projectMemberRepo, projectMemberRepo)
+		executorHandler.SetStepUp(mobileSessions, dashboardAuthService)
+		executorHandler.SetFiles(filePurger)
+		executorHandler.SetCompletion(decideApproval)
+		executorHandler.SetExecutionEnabled(executorEnabled)
+		api.RegisterExecutorFlowRoutes(mux, executorHandler)
 		if filePurger != nil {
 			projectHandler.SetSettingsDependencies(catalog, filePurger)
 		} else {
