@@ -18,14 +18,26 @@ func NewProjectFileRepository(pool *pgxpool.Pool) *ProjectFileRepository {
 	return &ProjectFileRepository{pool: pool}
 }
 
-const projectFileColumns = `id, project_id, name, content_type, kind, size_bytes, sha256, salt, nonce_prefix, chunk_size, uploaded_by, created_at, deleted_at`
+const projectFileColumns = `id, project_id, name, content_type, kind, size_bytes, sha256, salt, nonce_prefix, chunk_size, uploaded_by, created_at, deleted_at, relative_path, origin_task_id, origin_execution_id, executor_request_id`
 
 func (r *ProjectFileRepository) Insert(ctx context.Context, f domain.ProjectFile) error {
 	_, err := r.pool.Exec(ctx, `
-		INSERT INTO project_files (id, project_id, name, content_type, kind, size_bytes, sha256, salt, nonce_prefix, chunk_size, uploaded_by)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)`,
-		f.ID, f.ProjectID.Value, f.Name, f.ContentType, f.Kind, f.SizeBytes, f.SHA256, f.Salt, f.NoncePrefix, f.ChunkSize, nullString(f.UploadedBy))
+		INSERT INTO project_files (id, project_id, name, content_type, kind, size_bytes, sha256, salt, nonce_prefix, chunk_size, uploaded_by, relative_path, origin_task_id, origin_execution_id, executor_request_id)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)`,
+		f.ID, f.ProjectID.Value, f.Name, f.ContentType, f.Kind, f.SizeBytes, f.SHA256, f.Salt, f.NoncePrefix, f.ChunkSize, nullString(f.UploadedBy), f.RelativePath, nullableTaskID(f.OriginTaskID), nullableExecutionID(f.OriginExecutionID), f.ExecutorRequestID)
 	return err
+}
+func nullableTaskID(id *domain.TaskID) *uuid.UUID {
+	if id == nil {
+		return nil
+	}
+	return &id.Value
+}
+func nullableExecutionID(id *domain.ExecutionID) *uuid.UUID {
+	if id == nil {
+		return nil
+	}
+	return &id.Value
 }
 
 func (r *ProjectFileRepository) FindByID(ctx context.Context, id uuid.UUID) (domain.ProjectFile, error) {
@@ -58,8 +70,9 @@ func (r *ProjectFileRepository) SoftDelete(ctx context.Context, id uuid.UUID) er
 func scanProjectFile(row pgx.Row) (domain.ProjectFile, error) {
 	var f domain.ProjectFile
 	var uploadedBy *string
+	var originTaskID, originExecutionID *uuid.UUID
 	if err := row.Scan(&f.ID, &f.ProjectID.Value, &f.Name, &f.ContentType, &f.Kind, &f.SizeBytes, &f.SHA256, &f.Salt,
-		&f.NoncePrefix, &f.ChunkSize, &uploadedBy, &f.CreatedAt, &f.DeletedAt); err != nil {
+		&f.NoncePrefix, &f.ChunkSize, &uploadedBy, &f.CreatedAt, &f.DeletedAt, &f.RelativePath, &originTaskID, &originExecutionID, &f.ExecutorRequestID); err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return domain.ProjectFile{}, application.ErrProjectFileNotFound
 		}
@@ -67,6 +80,12 @@ func scanProjectFile(row pgx.Row) (domain.ProjectFile, error) {
 	}
 	if uploadedBy != nil {
 		f.UploadedBy = *uploadedBy
+	}
+	if originTaskID != nil {
+		f.OriginTaskID = &domain.TaskID{Value: *originTaskID}
+	}
+	if originExecutionID != nil {
+		f.OriginExecutionID = &domain.ExecutionID{Value: *originExecutionID}
 	}
 	return f, nil
 }
