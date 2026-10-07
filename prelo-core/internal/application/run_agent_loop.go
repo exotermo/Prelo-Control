@@ -9,6 +9,7 @@ import (
 	"log"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/exotermo/prelo-core/internal/domain"
 	"github.com/exotermo/prelo-core/internal/infrastructure/gateway"
@@ -83,14 +84,24 @@ type LoopResult struct {
 // (REQUIRE_APPROVAL). ProcessJobUseCase owns claiming/leasing the job and finalizing
 // Task/Execution state; this use case only owns what happens turn by turn.
 type RunAgentLoopUseCase struct {
-	llmGateway  LanguageModelGateway
-	tools       ToolRegistry
-	invokeTool  *InvokeToolUseCase
-	turns       ExecutionTurnRepository
-	suspensions ExecutionSuspensionRepository
-	jobs        ExecutionJobRepository
-	events      EventPublisher
-	owner       *OwnerApprovalNotifier
+	llmGateway           LanguageModelGateway
+	tools                ToolRegistry
+	invokeTool           *InvokeToolUseCase
+	turns                ExecutionTurnRepository
+	suspensions          ExecutionSuspensionRepository
+	jobs                 ExecutionJobRepository
+	events               EventPublisher
+	owner                *OwnerApprovalNotifier
+	availability         ToolAvailability
+	executorToolsEnabled bool
+}
+
+// SetToolAvailability applies project settings before exposing a tool to the model.
+func (uc *RunAgentLoopUseCase) SetToolAvailability(availability ToolAvailability) {
+	uc.availability = availability
+}
+func (uc *RunAgentLoopUseCase) SetExecutorToolsEnabled(enabled bool) {
+	uc.executorToolsEnabled = enabled
 }
 
 // SetOwnerNotifier wires Fase T: every approval an agent waits on is also sent to the owner's WhatsApp.
@@ -152,7 +163,10 @@ func (uc *RunAgentLoopUseCase) Run(ctx context.Context, task domain.Task, agent 
 		}
 	}
 
-	toolSpecs := toolSpecsFor(agent, uc.tools)
+	toolSpecs, err := toolSpecsForProject(ctx, agent, task.ProjectID, uc.tools, uc.availability, uc.executorToolsEnabled)
+	if err != nil {
+		return LoopResult{Outcome: LoopFailed, Err: err}, nil
+	}
 
 	for llmCalls < maxLLMCalls {
 		turnNumber := nextTurnNumber
@@ -209,6 +223,14 @@ func (uc *RunAgentLoopUseCase) Run(ctx context.Context, task domain.Task, agent 
 		}
 		llmCalls++
 		nextTurnNumber = turnNumber + 1
+		contextTokens := max(1, (len(inputJSON)+3)/4)
+		inputTokens, outputTokens, durationMs := resp.Usage.InputTokens, resp.Usage.OutputTokens, resp.DurationMs
+		if inputTokens < 0 || inputTokens > 2_000_000 || outputTokens < 0 || outputTokens > 1_000_000 || durationMs < 0 || durationMs > int64(time.Hour/time.Millisecond) {
+			inputTokens, outputTokens, durationMs = 0, 0, 0
+		}
+		if inputTokens > 0 || outputTokens > 0 || durationMs > 0 {
+			turn = turn.WithUsage(agent.ModelProfile, classifyTaskKind(task.Description), contextTokens, inputTokens, outputTokens, durationMs)
+		}
 
 		if !resp.IsToolUse() {
 			log.Printf("agent-loop: execution=%s turn=%d FINAL", execution.ID, turnNumber)
@@ -358,4 +380,38 @@ func toolSpecsFor(agent domain.AgentDefinition, tools ToolRegistry) []gateway.To
 		specs = append(specs, gateway.ToolSpec{Name: def.Name, Description: def.Description, InputSchema: def.InputSchema})
 	}
 	return specs
+}
+
+func toolSpecsForProject(ctx context.Context, agent domain.AgentDefinition, projectID *domain.ProjectID, tools ToolRegistry, availability ToolAvailability, executorEnabled bool) ([]gateway.ToolSpec, error) {
+	var specs []gateway.ToolSpec
+	for _, capability := range agent.Capabilities {
+		if IsExecutorTool(capability) {
+			if !executorEnabled || projectID == nil || availability == nil {
+				continue
+			}
+			setting, err := availability.Get(ctx, *projectID, capability)
+			if err != nil {
+				return nil, err
+			}
+			if !setting.Enabled || setting.Version == 0 {
+				continue
+			}
+		}
+		executor, ok := tools.Find(capability)
+		if !ok {
+			continue
+		}
+		if !IsExecutorTool(capability) && projectID != nil && availability != nil {
+			allowed, err := availability.Allowed(ctx, *projectID, capability)
+			if err != nil {
+				return nil, err
+			}
+			if !allowed {
+				continue
+			}
+		}
+		def := executor.Definition()
+		specs = append(specs, gateway.ToolSpec{Name: def.Name, Description: def.Description, InputSchema: def.InputSchema})
+	}
+	return specs, nil
 }
