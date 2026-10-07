@@ -2,10 +2,12 @@ package application
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 
 	"github.com/exotermo/prelo-core/internal/domain"
+	"github.com/google/uuid"
 )
 
 // DecideApprovalUseCase is the only path that can move a REQUIRE_APPROVAL tool call forward.
@@ -28,6 +30,76 @@ type DecideApprovalUseCase struct {
 	turns       ExecutionTurnRepository
 	suspensions ExecutionSuspensionRepository
 	jobs        ExecutionJobRepository
+	tasks       interface {
+		FindByID(context.Context, domain.TaskID) (domain.Task, error)
+	}
+	availability ToolAvailability
+	executorFlow *ExecutorFlow
+}
+
+func (uc *DecideApprovalUseCase) SetExecutorFlow(flow *ExecutorFlow) { uc.executorFlow = flow }
+
+// CompleteExecutorJob records the worker result in the tool-call ledger and resumes the
+// suspended model turn. The returned data is never treated as authorization.
+func (uc *DecideApprovalUseCase) CompleteExecutorJob(ctx context.Context, job ExecutorJob) error {
+	if job.Request.ToolCallID == nil || job.Request.ApprovalID == nil || !terminalExecutorStatus(job.Status) {
+		return ErrExecutorConflict
+	}
+	call, err := uc.calls.FindByID(ctx, domain.ToolCallID{Value: *job.Request.ToolCallID})
+	if err != nil {
+		return err
+	}
+	var outcome domain.ToolCallOutcome
+	var result, errMsg *string
+	message := string(job.Result)
+	if call.Outcome != nil {
+		if call.Result != nil {
+			message = *call.Result
+		} else if call.Error != nil {
+			message = *call.Error
+		}
+		return uc.resumeSuspendedExecution(ctx, domain.ApprovalRequestID{Value: *job.Request.ApprovalID}, message)
+	}
+	if job.Status == "SUCCEEDED" {
+		outcome = domain.OutcomeExecuted
+		if message == "" {
+			message = "{}"
+		}
+		result = &message
+	} else {
+		outcome = domain.OutcomeFailed
+		message = executorFailureMessage(job)
+		errMsg = &message
+	}
+	if _, err := uc.calls.Update(ctx, call.Resolved(outcome, result, errMsg)); err != nil {
+		return err
+	}
+	return uc.resumeSuspendedExecution(ctx, domain.ApprovalRequestID{Value: *job.Request.ApprovalID}, message)
+}
+
+func executorFailureMessage(job ExecutorJob) string {
+	if job.Status == "UNSUPPORTED_CAPACITY" {
+		return "Esta operação não cabe nos limites máximos deste worker. Divida a tarefa em partes menores ou escolha um host com mais recursos."
+	}
+	var result struct {
+		Code string `json:"code"`
+	}
+	_ = json.Unmarshal(job.Result, &result)
+	if result.Code == "resource_limit_exceeded" {
+		return "O container excedeu seu limite de recursos e foi interrompido. A operação não será repetida automaticamente."
+	}
+	return "A operação isolada falhou; consulte o status do pedido no projeto."
+}
+
+func terminalExecutorStatus(status string) bool {
+	return status == "SUCCEEDED" || status == "FAILED" || status == "CANCELLED" || status == "UNSUPPORTED_CAPACITY"
+}
+
+// SetToolAvailability prevents an already-pending approval from bypassing a later revocation.
+func (uc *DecideApprovalUseCase) SetToolAvailability(tasks interface {
+	FindByID(context.Context, domain.TaskID) (domain.Task, error)
+}, availability ToolAvailability) {
+	uc.tasks, uc.availability = tasks, availability
 }
 
 func NewDecideApprovalUseCase(approvals ApprovalRepository, calls ToolCallRepository, tools ToolRegistry, executions ExecutionRepository, turns ExecutionTurnRepository, suspensions ExecutionSuspensionRepository, jobs ExecutionJobRepository) *DecideApprovalUseCase {
@@ -113,6 +185,45 @@ func (uc *DecideApprovalUseCase) Approve(ctx context.Context, id domain.Approval
 	if err != nil {
 		return domain.ApprovalRequest{}, err
 	}
+	if !approval.IsAction() && uc.availability != nil {
+		call, err := uc.calls.FindByID(ctx, approval.ToolCallID)
+		if err != nil {
+			return domain.ApprovalRequest{}, err
+		}
+		task, err := uc.tasks.FindByID(ctx, call.TaskID)
+		if err != nil {
+			return domain.ApprovalRequest{}, err
+		}
+		if task.ProjectID != nil {
+			setting, err := uc.availability.Get(ctx, *task.ProjectID, call.ToolName)
+			if err != nil {
+				return domain.ApprovalRequest{}, err
+			}
+			if !setting.Enabled || setting.Version != call.ToolPolicyVersion {
+				return domain.ApprovalRequest{}, ErrForbidden
+			}
+		}
+	}
+	var modelCall *domain.ToolCall
+	if !approval.IsAction() {
+		loaded, err := uc.calls.FindByID(ctx, approval.ToolCallID)
+		if err != nil {
+			return domain.ApprovalRequest{}, err
+		}
+		modelCall = &loaded
+		if _, isExecutor := ExecutorOperation(loaded.ToolName); isExecutor {
+			if uc.executorFlow == nil {
+				return domain.ApprovalRequest{}, ErrExecutorUnauthorized
+			}
+			actorID, err := uuid.Parse(decidedBy)
+			if err != nil {
+				return domain.ApprovalRequest{}, ErrExecutorUnauthorized
+			}
+			if _, err := uc.executorFlow.DecideByToolCall(ctx, loaded.ID.Value, actorID, true); err != nil {
+				return domain.ApprovalRequest{}, err
+			}
+		}
+	}
 	approved, err := approval.Approve(decidedBy)
 	if err != nil {
 		return domain.ApprovalRequest{}, err
@@ -125,6 +236,12 @@ func (uc *DecideApprovalUseCase) Approve(ctx context.Context, id domain.Approval
 		uc.actionDecided(ctx, approved)
 		return approved, nil
 	}
+	if modelCall != nil {
+		if _, isExecutor := ExecutorOperation(modelCall.ToolName); isExecutor {
+			// The worker's terminal result completes the open turn and wakes the task.
+			return approved, nil
+		}
+	}
 
 	// The ApprovalRequest is already persisted as APPROVED above — that part genuinely
 	// succeeded. A failure from here on must still propagate (not silently report success):
@@ -132,10 +249,7 @@ func (uc *DecideApprovalUseCase) Approve(ctx context.Context, id domain.Approval
 	// AWAITING_RESUME job is deliberately excluded from the sweeper's orphan recovery, so
 	// nothing would ever retry it), and the caller would have no way to know something was
 	// left undone.
-	call, err := uc.calls.FindByID(ctx, approval.ToolCallID)
-	if err != nil {
-		return domain.ApprovalRequest{}, fmt.Errorf("approval %s recorded, but its tool call could not be loaded: %w", id, err)
-	}
+	call := *modelCall
 	execution, err := uc.executions.FindByID(ctx, call.ExecutionID)
 	if err != nil {
 		return domain.ApprovalRequest{}, fmt.Errorf("approval %s recorded, but its execution could not be loaded: %w", id, err)
@@ -185,6 +299,16 @@ func (uc *DecideApprovalUseCase) Deny(ctx context.Context, id domain.ApprovalReq
 	approval, err := uc.approvals.FindByID(ctx, id)
 	if err != nil {
 		return domain.ApprovalRequest{}, err
+	}
+	if !approval.IsAction() {
+		call, err := uc.calls.FindByID(ctx, approval.ToolCallID)
+		if err == nil {
+			if _, isExecutor := ExecutorOperation(call.ToolName); isExecutor && uc.executorFlow != nil {
+				if actorID, parseErr := uuid.Parse(decidedBy); parseErr == nil {
+					_, _ = uc.executorFlow.DecideByToolCall(ctx, call.ID.Value, actorID, false)
+				}
+			}
+		}
 	}
 	denied, err := approval.Deny(decidedBy)
 	if err != nil {
