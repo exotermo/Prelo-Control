@@ -10,6 +10,7 @@ import {
 } from "../api/client";
 import { ModelPanel } from "./model/ModelPanel";
 import { FilesPanel } from "./files/FilesPanel";
+import { ToolboxPanel } from "./ToolboxPanel";
 import { ProjectSettingsPanel } from "./ProjectSettingsPanel";
 import { COVER_COLORS } from "./coverColors";
 import { PROVIDERS } from "./model/providers";
@@ -92,6 +93,7 @@ export function ProjectSheet({ token, project, section, onSection, onBack, onEnt
       <nav className="section-tabs" aria-label="Seções do projeto">
         <button type="button" className={section === "visao-geral" ? "active" : ""} onClick={() => setSection("visao-geral")}>Visão geral</button>
         <button type="button" className={section === "modelo" ? "active" : ""} onClick={() => setSection("modelo")}>Modelo</button>
+        <button type="button" className={section === "ferramentas" ? "active" : ""} onClick={() => setSection("ferramentas")}>Ferramentas</button>
         <button type="button" className={section === "arquivos" ? "active" : ""} onClick={() => setSection("arquivos")}>Arquivos</button>
         <button type="button" className={section === "configuracoes" ? "active" : ""} onClick={() => setSection("configuracoes")}>Configurações</button>
       </nav>
@@ -118,6 +120,7 @@ export function ProjectSheet({ token, project, section, onSection, onBack, onEnt
         {section === "modelo" && (
           <ModelPanel token={token} scope={{ kind: "project", projectId: project.id }} canManage={canManage} title={`para o projeto ${project.name}`} />
         )}
+        {section === "ferramentas" && <ToolboxPanel token={token} projectId={project.id} canManage={canManage} />}
         {section === "arquivos" && <FilesPanel token={token} projectId={project.id} />}
         {section === "configuracoes" && (
           <ProjectSettingsPanel key={project.id} token={token} project={project} onSaved={onSaved} onDeleted={onDeleted} />
