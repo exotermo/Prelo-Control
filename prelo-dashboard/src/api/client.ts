@@ -120,6 +120,28 @@ export function createTask(token: string, description: string, agentId?: string,
   return postJSON<Task>("/api/v1/tasks", { description, agentId, context }, token, projectId);
 }
 
+export interface EstimateRange { min: number; expected: number; max: number }
+export interface EstimateConfidence { level: "LOW" | "MEDIUM" | "HIGH"; sampleCount: number; basis: string }
+export interface TaskEstimate {
+  taskKind: string;
+  modelProfile: string;
+  contextSize: string;
+  observedAt: string;
+  hardware: {
+    required: boolean; profileId?: string; cpuMilli?: number; memoryBytes?: number; temporaryBytes?: number;
+    concurrency: EstimateRange;
+    workerCapacity?: { profileId: string; availableSlots: number; maximumSlots: number; activeContainers: number; observedAt: string };
+    confidence: EstimateConfidence;
+  };
+  tokens: { input: EstimateRange; output: EstimateRange; confidence: EstimateConfidence };
+  modelTime: { milliseconds: EstimateRange; confidence: EstimateConfidence };
+  reviewAndTests: { minutes: EstimateRange; risk: string; factors: string[]; confidence: EstimateConfidence };
+}
+
+export function estimateTask(token: string, description: string, agentId?: string, projectId?: string): Promise<TaskEstimate> {
+  return postJSON<TaskEstimate>("/api/v1/tasks/estimate", { description, agentId }, token, projectId);
+}
+
 export interface Execution {
   executionId: string;
   taskId: string;
@@ -157,6 +179,7 @@ export interface Turn {
   error: string | null;
   startedAt: string;
   completedAt: string | null;
+  usage?: { modelProfile: string; taskKind: string; estimatedContextTokens: number; inputTokens: number; outputTokens: number; durationMs: number };
 }
 
 export function getTurns(token: string, taskId: string, executionId: string): Promise<Turn[]> {
@@ -447,6 +470,87 @@ export function listAgents(token: string): Promise<AgentSummary[]> {
   return request<AgentSummary[]>("/api/v1/agents", { method: "GET" }, token);
 }
 
+// Project ceiling over the curated tool catalog. Enabling only permits a model to ask;
+// PermissionPolicy and a human approval still decide each risky call.
+export interface ToolboxTool {
+  name: string;
+  description: string;
+  riskLevel: "LOW" | "MODERATE" | "HIGH";
+  impact: string;
+  enabled: boolean;
+  version: number;
+  agents: string[];
+  resourceProfile?: ExecutorResourceProfile;
+}
+
+export interface ExecutorResourceProfile {
+  id: string;
+  memoryBytes: number;
+  cpuQuotaMilli: number;
+  diskBytes: number;
+  pids: number;
+  maxRuntimeSeconds: number;
+  maxContainersPerExecution: number;
+}
+
+export interface ProjectToolbox {
+  projectId: string;
+  tools: ToolboxTool[];
+  workerStatus: "DISABLED" | "NO_WORKER" | "READY";
+  resourceProfiles: ExecutorResourceProfile[];
+  profileEnforcement: "DEFINED_NOT_ENFORCED";
+}
+
+export function getProjectToolbox(token: string, projectId: string): Promise<ProjectToolbox> {
+  return request<ProjectToolbox>(`/api/v1/projects/${projectId}/toolbox`, { method: "GET" }, token);
+}
+
+export function setProjectTool(token: string, projectId: string, tool: ToolboxTool, enabled: boolean): Promise<{ enabled: boolean; version: number }> {
+  return request(`/api/v1/projects/${projectId}/toolbox/${encodeURIComponent(tool.name)}`, {
+    method: "PUT", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ enabled, expectedVersion: tool.version }),
+  }, token);
+}
+
+export interface ExecutorWorkerSummary {
+  id: string;
+  name: string;
+  projectId: string;
+  imageDigest: string;
+  enabled: boolean;
+  lastSeenAt: string | null;
+  runtimeStatus: "DISABLED" | "OFFLINE" | "READY" | "REVOKED";
+}
+
+export function listExecutorWorkers(token: string): Promise<ExecutorWorkerSummary[]> {
+  return request<ExecutorWorkerSummary[]>("/api/v1/executor-workers", { method: "GET" }, token);
+}
+
+export interface ExecutorRequestView {
+  id: string;
+  payload: { projectId: string; taskId: string; executionId: string; workerId: string; imageDigest: string;
+    operation: "START_WORKSPACE" | "LIST" | "READ" | "MKDIR" | "CREATE";
+    args: { path?: string; contentBase64?: string } };
+  payloadHash: string;
+  status: "PENDING" | "APPROVED" | "DENIED" | "EXPIRED";
+  requestedBy: string;
+  requestedAt: string;
+  expiresAt: string;
+  canApprove: boolean;
+  jobStatus?: "READY" | "WAITING_FOR_CAPACITY" | "UNSUPPORTED_CAPACITY" | "CLAIMED" | "RUNNING" | "SUCCEEDED" | "FAILED" | "CANCELLED";
+  jobResult?: { code?: string; message?: string };
+}
+
+export function listExecutorRequests(token: string, projectId: string): Promise<ExecutorRequestView[]> {
+  return request<ExecutorRequestView[]>(`/api/v1/projects/${projectId}/executor-requests`, { method: "GET" }, token);
+}
+
+export function decideExecutorRequest(token: string, id: string, approve: boolean, totpCode?: string): Promise<ExecutorRequestView> {
+  return request<ExecutorRequestView>(`/api/v1/executor-requests/${id}/${approve ? "approve" : "deny"}`, {
+    method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(totpCode ? { totpCode } : {}),
+  }, token);
+}
+
 // --- project files (Fase PA): sealed at rest by prelo-core; up to 100 MB each. ---
 
 export interface ProjectFile {
@@ -459,6 +563,9 @@ export interface ProjectFile {
   sha256: string;
   uploadedBy: string;
   createdAt: string;
+  relativePath?: string;
+  originTaskId?: string;
+  originExecutionId?: string;
 }
 
 export interface ProjectFileList { files: ProjectFile[]; totalBytes: number; maxFileBytes: number }
