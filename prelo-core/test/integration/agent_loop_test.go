@@ -35,9 +35,11 @@ func (g *toolAwareLlmGateway) Chat(_ context.Context, req gateway.ChatRequest, r
 		if args == "" {
 			args = "{}"
 		}
-		return gateway.ChatResponse{Kind: gateway.KindToolUse, ToolName: g.targetTool, ToolArgsJSON: args, RequestID: requestID}, nil
+		return gateway.ChatResponse{Kind: gateway.KindToolUse, ToolName: g.targetTool, ToolArgsJSON: args, RequestID: requestID,
+			Usage: gateway.Usage{InputTokens: 120, OutputTokens: 18, TotalTokens: 138}, DurationMs: 240}, nil
 	}
-	return gateway.ChatResponse{Kind: gateway.KindFinal, Content: "done", Provider: "mock", Model: "mock-echo", RequestID: requestID}, nil
+	return gateway.ChatResponse{Kind: gateway.KindFinal, Content: "done", Provider: "mock", Model: "mock-echo", RequestID: requestID,
+		Usage: gateway.Usage{InputTokens: 160, OutputTokens: 12, TotalTokens: 172}, DurationMs: 310}, nil
 }
 
 type agentLoopFixture struct {
@@ -132,6 +134,9 @@ func TestAgentLoop_LowRiskTool_CompletesAutomatically(t *testing.T) {
 	}
 	if turns[0].Kind != domain.TurnLLMCall || turns[1].Kind != domain.TurnToolCall || turns[2].Kind != domain.TurnLLMCall {
 		t.Fatalf("unexpected turn sequence: %+v", turns)
+	}
+	if turns[0].InputTokens != 120 || turns[0].OutputTokens != 18 || turns[0].DurationMs != 240 || turns[0].TaskKind != "GENERAL" || turns[0].ModelProfile == "" {
+		t.Fatalf("Gateway usage should be persisted as aggregate estimate telemetry: %+v", turns[0])
 	}
 	for _, turn := range turns {
 		if turn.CompletedAt == nil {
