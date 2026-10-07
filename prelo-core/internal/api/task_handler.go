@@ -18,6 +18,7 @@ type TaskHandler struct {
 	tasks      application.TaskRepository
 	executions application.ExecutionRepository
 	enqueue    *application.EnqueueExecutionUseCase
+	estimator  *application.TaskEstimator
 }
 
 type tenantTaskReader interface {
@@ -27,6 +28,43 @@ type tenantTaskReader interface {
 
 func NewTaskHandler(create *application.CreateTaskUseCase, tasks application.TaskRepository, executions application.ExecutionRepository, enqueue *application.EnqueueExecutionUseCase) *TaskHandler {
 	return &TaskHandler{create: create, tasks: tasks, executions: executions, enqueue: enqueue}
+}
+
+func (h *TaskHandler) SetTaskEstimator(estimator *application.TaskEstimator) { h.estimator = estimator }
+
+func (h *TaskHandler) Estimate(w http.ResponseWriter, r *http.Request) {
+	if h.estimator == nil {
+		writeError(w, &domain.ValidationError{Message: "task estimator is unavailable"})
+		return
+	}
+	r.Body = http.MaxBytesReader(w, r.Body, 32*1024)
+	var req struct {
+		Description string  `json:"description"`
+		AgentID     *string `json:"agentId"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, &domain.ValidationError{Message: "invalid request body"})
+		return
+	}
+	var agentID *domain.AgentID
+	if req.AgentID != nil && strings.TrimSpace(*req.AgentID) != "" {
+		parsed, err := domain.NewAgentID(*req.AgentID)
+		if err != nil {
+			writeError(w, err)
+			return
+		}
+		agentID = &parsed
+	}
+	var projectID *uuid.UUID
+	if raw := projectIdentity(r.Context()); raw != nil {
+		projectID = raw
+	}
+	estimate, err := h.estimator.Estimate(r.Context(), req.Description, agentID, projectID)
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, estimate)
 }
 
 func (h *TaskHandler) Create(w http.ResponseWriter, r *http.Request) {
