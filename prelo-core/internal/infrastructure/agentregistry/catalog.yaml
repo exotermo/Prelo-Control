@@ -18,7 +18,8 @@ general:
   # delegate_to_agent (Fase C) lets General delegate to any curated agent, itself included —
   # domain.MaxDelegationDepth is what actually bounds a runaway chain, not this list.
   capabilities: ["current_time", "echo", "delegate_to_agent", "search_workspace", "get_client", "add_client_note",
-                 "list_servers", "check_server_health", "inspect_website", "send_whatsapp_message"]
+                 "list_servers", "check_server_health", "inspect_website", "send_whatsapp_message",
+                 "workspace_start", "workspace_list", "workspace_read", "workspace_mkdir", "workspace_create_file"]
   name: General
   description: "Default assistant for open-ended tasks."
 concise:
