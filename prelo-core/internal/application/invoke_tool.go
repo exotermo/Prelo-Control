@@ -45,6 +45,20 @@ type InvokeToolUseCase struct {
 	approvals  ApprovalRepository
 	limits     ToolExecutionLimits
 	semaphore  chan struct{}
+	tasks      interface {
+		FindByID(context.Context, domain.TaskID) (domain.Task, error)
+	}
+	availability ToolAvailability
+	executorFlow *ExecutorFlow
+}
+
+func (uc *InvokeToolUseCase) SetExecutorFlow(flow *ExecutorFlow) { uc.executorFlow = flow }
+
+// SetToolAvailability applies the same project ceiling to direct API calls and model calls.
+func (uc *InvokeToolUseCase) SetToolAvailability(tasks interface {
+	FindByID(context.Context, domain.TaskID) (domain.Task, error)
+}, availability ToolAvailability) {
+	uc.tasks, uc.availability = tasks, availability
 }
 
 func NewInvokeToolUseCase(executions ExecutionRepository, agents AgentRegistry, tools ToolRegistry, policy PermissionPolicy, calls ToolCallRepository, approvals ApprovalRepository) *InvokeToolUseCase {
@@ -93,11 +107,35 @@ func (uc *InvokeToolUseCase) Invoke(ctx context.Context, executionID domain.Exec
 	}
 
 	decision := domain.DecisionDeny
+	var toolPolicyVersion int64
 	if hasCapability(agent, toolDef.Name) {
 		decision = uc.policy.Evaluate(agent, toolDef)
 	}
+	if IsExecutorTool(toolDef.Name) && (uc.executorFlow == nil || !uc.executorFlow.Enabled()) {
+		decision = domain.DecisionDeny
+	}
+	if uc.availability != nil {
+		if uc.tasks == nil {
+			return domain.ToolCall{}, nil, fmt.Errorf("tool availability requires a task reader")
+		}
+		task, err := uc.tasks.FindByID(ctx, execution.TaskID)
+		if err != nil {
+			return domain.ToolCall{}, nil, err
+		}
+		if task.ProjectID != nil {
+			setting, err := uc.availability.Get(ctx, *task.ProjectID, toolDef.Name)
+			if err != nil {
+				return domain.ToolCall{}, nil, err // fail closed on policy storage outage
+			}
+			toolPolicyVersion = setting.Version
+			if !setting.Enabled || (IsExecutorTool(toolDef.Name) && setting.Version == 0) {
+				decision = domain.DecisionDeny
+			}
+		}
+	}
 
 	call := domain.NewToolCall(execution.TaskID, execution.ID, agent.AgentID, toolDef.Name, argsJSON, toolDef.RiskLevel, decision)
+	call.ToolPolicyVersion = toolPolicyVersion
 	if err := uc.calls.Insert(ctx, call); err != nil {
 		return domain.ToolCall{}, nil, err
 	}
@@ -108,6 +146,25 @@ func (uc *InvokeToolUseCase) Invoke(ctx context.Context, executionID domain.Exec
 		resolved, err := uc.calls.Update(ctx, call.Resolved(outcome, nil, nil))
 		return resolved, nil, err
 	case domain.DecisionRequireApproval:
+		var pendingExecutor *ExecutorRequest
+		if operation, isExecutor := ExecutorOperation(toolDef.Name); isExecutor {
+			if uc.executorFlow == nil || uc.tasks == nil {
+				return domain.ToolCall{}, nil, ErrExecutorUnauthorized
+			}
+			task, err := uc.tasks.FindByID(ctx, execution.TaskID)
+			if err != nil || task.ProjectID == nil {
+				return domain.ToolCall{}, nil, ErrExecutorUnauthorized
+			}
+			args, err := ExecutorArgsFromToolCall(operation, argsJSON)
+			if err != nil {
+				return domain.ToolCall{}, nil, err
+			}
+			request, err := uc.executorFlow.CreateForToolCall(ctx, *task.ProjectID, execution, call, operation, args, "prelo:agent:"+agent.AgentID.String())
+			if err != nil {
+				return domain.ToolCall{}, nil, err
+			}
+			pendingExecutor = &request
+		}
 		scope := fmt.Sprintf("agente %s pede a ferramenta %q (risco %s) com argumentos %s", agent.AgentID.String(), toolDef.Name, toolDef.RiskLevel, argsJSON)
 		if toolDef.Impact != "" {
 			scope += " — impacto: " + toolDef.Impact
@@ -115,6 +172,11 @@ func (uc *InvokeToolUseCase) Invoke(ctx context.Context, executionID domain.Exec
 		approval := domain.NewApprovalRequest(call.ID, scope, defaultApprovalTTL)
 		if err := uc.approvals.Insert(ctx, approval); err != nil {
 			return domain.ToolCall{}, nil, err
+		}
+		if pendingExecutor != nil {
+			if err := uc.executorFlow.LinkApproval(ctx, pendingExecutor.ID, approval.ID.Value); err != nil {
+				return domain.ToolCall{}, nil, err
+			}
 		}
 		approvalID := approval.ID
 		return call, &approvalID, nil
@@ -124,6 +186,15 @@ func (uc *InvokeToolUseCase) Invoke(ctx context.Context, executionID domain.Exec
 	default:
 		return domain.ToolCall{}, nil, &domain.ValidationError{Message: "unknown permission decision"}
 	}
+}
+
+func ExecutorOperation(toolName string) (string, bool) {
+	for operation, name := range executorToolNames {
+		if name == toolName {
+			return operation, true
+		}
+	}
+	return "", false
 }
 
 func hasCapability(agent domain.AgentDefinition, toolName string) bool {
