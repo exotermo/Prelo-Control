@@ -23,19 +23,23 @@ const (
 // non-secret parameters the filestore needs to decrypt it; the key itself is derived from the
 // master key and never stored.
 type ProjectFile struct {
-	ID          uuid.UUID
-	ProjectID   ProjectID
-	Name        string
-	ContentType string
-	Kind        string
-	SizeBytes   int64
-	SHA256      []byte
-	Salt        []byte
-	NoncePrefix []byte
-	ChunkSize   int
-	UploadedBy  string
-	CreatedAt   time.Time
-	DeletedAt   *time.Time
+	ID                uuid.UUID
+	ProjectID         ProjectID
+	Name              string
+	ContentType       string
+	Kind              string
+	SizeBytes         int64
+	SHA256            []byte
+	Salt              []byte
+	NoncePrefix       []byte
+	ChunkSize         int
+	UploadedBy        string
+	CreatedAt         time.Time
+	DeletedAt         *time.Time
+	RelativePath      *string
+	OriginTaskID      *TaskID
+	OriginExecutionID *ExecutionID
+	ExecutorRequestID *uuid.UUID
 }
 
 // Inline reports whether the browser may render this file in place. Only types that cannot run
