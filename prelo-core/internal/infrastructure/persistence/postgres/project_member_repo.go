@@ -7,6 +7,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/exotermo/prelo-core/internal/application"
 	"github.com/exotermo/prelo-core/internal/domain"
 )
 
@@ -17,11 +18,18 @@ func NewProjectMemberRepository(pool *pgxpool.Pool) *ProjectMemberRepository {
 }
 
 func (r *ProjectMemberRepository) Add(ctx context.Context, member domain.ProjectMember) error {
+	role := member.Role
+	if role == "" {
+		role = "MEMBER"
+	}
+	if role != "MEMBER" {
+		return &domain.ValidationError{Message: "project administrator must be assigned through SetRole"}
+	}
 	_, err := r.pool.Exec(ctx, `
-		INSERT INTO project_members (project_id, dashboard_user_id, added_at, added_by)
-		VALUES ($1,$2,$3,$4)
+		INSERT INTO project_members (project_id, dashboard_user_id, added_at, added_by, role)
+		VALUES ($1,$2,$3,$4,$5)
 		ON CONFLICT (project_id, dashboard_user_id) DO NOTHING`,
-		member.ProjectID.Value, member.UserID.Value, member.AddedAt, nullString(member.AddedBy))
+		member.ProjectID.Value, member.UserID.Value, member.AddedAt, nullString(member.AddedBy), role)
 	return err
 }
 
@@ -32,7 +40,7 @@ func (r *ProjectMemberRepository) Remove(ctx context.Context, projectID domain.P
 
 func (r *ProjectMemberRepository) ListMembers(ctx context.Context, projectID domain.ProjectID) ([]domain.ProjectMember, error) {
 	rows, err := r.pool.Query(ctx, `
-		SELECT project_id, dashboard_user_id, added_at, added_by
+		SELECT project_id, dashboard_user_id, added_at, added_by, role
 		  FROM project_members WHERE project_id = $1 ORDER BY added_at`, projectID.Value)
 	if err != nil {
 		return nil, err
@@ -83,10 +91,31 @@ func (r *ProjectMemberRepository) IsMember(ctx context.Context, projectID domain
 	return exists, err
 }
 
+func (r *ProjectMemberRepository) IsProjectAdmin(ctx context.Context, projectID domain.ProjectID, userID domain.DashboardUserID) (bool, error) {
+	var allowed bool
+	err := r.pool.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM project_members m JOIN dashboard_users u ON u.id=m.dashboard_user_id
+		WHERE m.project_id=$1 AND m.dashboard_user_id=$2 AND m.role='PROJECT_ADMIN' AND u.activated_at IS NOT NULL)`, projectID.Value, userID.Value).Scan(&allowed)
+	return allowed, err
+}
+
+func (r *ProjectMemberRepository) SetRole(ctx context.Context, projectID domain.ProjectID, userID domain.DashboardUserID, role string) error {
+	if role != "MEMBER" && role != "PROJECT_ADMIN" {
+		return &domain.ValidationError{Message: "invalid project role"}
+	}
+	tag, err := r.pool.Exec(ctx, `UPDATE project_members SET role=$3 WHERE project_id=$1 AND dashboard_user_id=$2`, projectID.Value, userID.Value, role)
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() == 0 {
+		return application.ErrNotProjectMember
+	}
+	return nil
+}
+
 func scanProjectMember(row pgx.Row) (domain.ProjectMember, error) {
 	var m domain.ProjectMember
 	var addedBy *string
-	if err := row.Scan(&m.ProjectID.Value, &m.UserID.Value, &m.AddedAt, &addedBy); err != nil {
+	if err := row.Scan(&m.ProjectID.Value, &m.UserID.Value, &m.AddedAt, &addedBy, &m.Role); err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return domain.ProjectMember{}, nil
 		}
